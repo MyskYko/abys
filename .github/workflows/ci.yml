@@ -1,0 +1,89 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc
+          - clang
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format clang-tidy
+      - name: Cache slang (prebuilt)
+        uses: actions/cache@v4
+        with:
+          path: _slang
+          key: slang-ubuntu-2025-12-26
+      - name: Fetch slang (prebuilt)
+        run: |
+          if [ -d _slang/lib/cmake/slang ]; then
+            echo "Using cached slang package"
+            exit 0
+          fi
+          mkdir -p _slang
+          curl -L -o slang-ubuntu-latest.tar.gz \
+            https://github.com/MyskYko/slang/releases/download/slang-ubuntu-2025-12-26/slang-ubuntu-latest.tar.gz
+          if [ -n "${SLANG_TARBALL_SHA256:-}" ]; then
+            echo "${SLANG_TARBALL_SHA256}  slang-ubuntu-latest.tar.gz" | sha256sum --check
+          fi
+          tar -xzf slang-ubuntu-latest.tar.gz -C _slang
+      - name: Configure
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            export CC=clang
+            export CXX=clang++
+          else
+            export CC=gcc
+            export CXX=g++
+          fi
+          cmake -S . -B build -Dslang_DIR="$PWD/_slang/lib/cmake/slang"
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build
+      - name: Format check
+        run: ./scripts/format_check.sh
+
+  clang-tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format clang-tidy
+      - name: Cache slang (prebuilt)
+        uses: actions/cache@v4
+        with:
+          path: _slang
+          key: slang-ubuntu-2025-12-26
+      - name: Fetch slang (prebuilt)
+        run: |
+          if [ -d _slang/lib/cmake/slang ]; then
+            echo "Using cached slang package"
+            exit 0
+          fi
+          mkdir -p _slang
+          curl -L -o slang-ubuntu-latest.tar.gz \
+            https://github.com/MyskYko/slang/releases/download/slang-ubuntu-2025-12-26/slang-ubuntu-latest.tar.gz
+          if [ -n "${SLANG_TARBALL_SHA256:-}" ]; then
+            echo "${SLANG_TARBALL_SHA256}  slang-ubuntu-latest.tar.gz" | sha256sum --check
+          fi
+          tar -xzf slang-ubuntu-latest.tar.gz -C _slang
+      - name: Configure
+        run: |
+          export CC=clang
+          export CXX=clang++
+          cmake -S . -B build -Dslang_DIR="$PWD/_slang/lib/cmake/slang"
+      - name: Clang-tidy
+        run: ./scripts/run_clang_tidy.sh build/compile_commands.json
