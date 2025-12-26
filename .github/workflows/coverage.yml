@@ -43,6 +43,11 @@ jobs:
         run: |
           gcovr -r . --xml -o build/coverage.xml
           gcovr -r . --html --html-details -o build/coverage.html
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: build/coverage.xml
+          fail_ci_if_error: true
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
         with:
