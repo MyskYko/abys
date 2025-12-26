@@ -15,8 +15,26 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcovr
+      - name: Cache slang (prebuilt)
+        uses: actions/cache@v4
+        with:
+          path: _slang
+          key: slang-ubuntu-2025-12-26
+      - name: Fetch slang (prebuilt)
+        run: |
+          if [ -d _slang/lib/cmake/slang ]; then
+            echo "Using cached slang package"
+            exit 0
+          fi
+          mkdir -p _slang
+          curl -L -o slang-ubuntu-latest.tar.gz \
+            https://github.com/MyskYko/slang/releases/download/slang-ubuntu-2025-12-26/slang-ubuntu-latest.tar.gz
+          if [ -n "${SLANG_TARBALL_SHA256:-}" ]; then
+            echo "${SLANG_TARBALL_SHA256}  slang-ubuntu-latest.tar.gz" | sha256sum --check
+          fi
+          tar -xzf slang-ubuntu-latest.tar.gz -C _slang
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DABYS_ENABLE_COVERAGE=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DABYS_ENABLE_COVERAGE=ON -Dslang_DIR="$PWD/_slang/lib/cmake/slang"
       - name: Build
         run: cmake --build build
       - name: Test
