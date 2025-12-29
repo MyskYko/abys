@@ -22,6 +22,7 @@ endif()
 set(ABYS_CORE_SOURCES
   src/version.cpp
   src/frontend_slang.cpp
+  src/ir/tig_builder.cpp
 )
 find_package(slang CONFIG REQUIRED)
 
