@@ -21,20 +21,22 @@ private:
 
 public:
   using NodeId = Tig::NodeId;
-  using PortIndex = Tig::PortIndex;
   using ModuleId = Tig::ModuleId;
-  using SignalWidth = Tig::SignalWidth;
   static constexpr NodeId kInvalidNodeId = Tig::kInvalidNodeId;
   static constexpr ModuleId kInvalidModuleId = Tig::kInvalidModuleId;
   using Module = Tig::Module;
+  using Node = Tig::Module::Node;
   using NodeKind = Tig::Module::NodeKind;
   using EdgeRef = Tig::Module::EdgeRef;
   using Signal = EdgeRef;
   using SignalSpec = Tig::Module::Node::Output;
 
 private:
-  NodeId create_node(Module &module, NodeKind kind);
-  void add_signal(Module &module, std::string_view name, EdgeRef edge);
+  std::vector<std::vector<std::vector<SignalSpec>>> input_specs;
+
+  NodeId create_node(ModuleId module_id, NodeKind kind);
+  void add_signal(ModuleId module_id, std::string_view name, Signal signal);
+  void add_input_spec(ModuleId module_id, NodeId node_id, SignalSpec input_spec);
 
 public:
   explicit TigBuilder(Tig &design) : design_(design) {}
@@ -43,14 +45,19 @@ public:
 
   NodeId create_module_input(ModuleId module_id, std::string name, SignalWidth width, bool sign);
   NodeId create_module_output(ModuleId module_id, std::string name, SignalWidth width, bool sign,
-                              NodeId input_id, PortIndex port_idx = 0);
+			      std::string input_name, SignalWidth input_width, bool input_sign,
+                              NodeId input_id = kInvalidNodeId, PortIndex port_idx = 0);
 
-  NodeId create_conversion_node(ModuleId module_id, std::string name, SignalWidth width, bool sign,
-                                NodeId input_id, PortIndex port_idx = 0);
+  NodeId create_instance(ModuleId module_id, std::string name, ModuleId instance_module_id);
+  NodeId create_operation(ModuleId module_id);
 
-  NodeId create_instance(ModuleId module_id, std::string name, ModuleId instance_module_id,
-                         std::vector<Signal> &node_inputs,
-                         std::vector<SignalSpec> &node_outputs);
+  void add_node_input(ModuleId module_id, NodeId node_id, NodeId input_id, PortIndex port_idx = 0);
+  void add_node_input_spec(ModuleId module_id, NodeId node_id, std::string name, SignalWidth width, bool sign);
+  void finalize_node_input(ModuleId module_id, NodeId node_id);
+  void add_node_output(ModuleId module_id, NodeId node_id, std::string name, SignalWidth width, bool sign);
+
+  std::vector<ExprNode> &get_expr_nodes_ref(ModuleId module_id, NodeId node_id);
+  void wire_connections(ModuleId module_id);
 
   void set_node_input(ModuleId module_id, NodeId node_id, PortIndex port_idx, Signal input);
 

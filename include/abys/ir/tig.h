@@ -1,19 +1,19 @@
 #pragma once
 
-#include <cstdint>
 #include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "abys/ir/expr.h"
+#include "abys/ir/type.h"
 
 namespace abys::ir {
 
   struct Tig {
     
     using NodeId = uint32_t;
-    using PortIndex = uint32_t;
     using ModuleId = uint32_t;
-    using SignalWidth = uint64_t;
     static constexpr NodeId kInvalidNodeId = std::numeric_limits<NodeId>::max();
     static constexpr ModuleId kInvalidModuleId = std::numeric_limits<ModuleId>::max();
     
@@ -36,10 +36,6 @@ namespace abys::ir {
 	kPo,
 	kRi,
 	kRo,
-	kConst,
-	kSplit,
-	kMerge,
-	kConvert,
 	kOp,
 	kUnknown,
       };
@@ -48,8 +44,6 @@ namespace abys::ir {
 	NodeKind kind = NodeKind::kUnknown;
 	std::string name; // instance name
 	ModuleId module_id = kInvalidModuleId;
-	std::string op;
-	std::string const_value;
 	std::vector<EdgeRef> inputs;
 	struct Output {
 	  std::string name;
@@ -57,7 +51,8 @@ namespace abys::ir {
 	  bool sign = false;
 	};
 	std::vector<Output> outputs;
-	std::vector<SignalWidth> segment_widths;
+	std::vector<ExprId> expr_roots;
+	std::vector<ExprNode> expr_nodes;
       };
       
       enum class BlockKind {
