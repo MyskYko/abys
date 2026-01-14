@@ -14,6 +14,7 @@ ParseResult parse_systemverilog(const std::vector<std::string> &files,
   }
 
   slang::driver::Driver driver;
+  driver.addStandardArgs();
 
   for (const auto &file : files) {
     driver.sourceLoader.addFiles(file);
@@ -53,6 +54,7 @@ ir::TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &
   }
 
   slang::driver::Driver driver;
+  driver.addStandardArgs();
 
   for (const auto &file : files) {
     driver.sourceLoader.addFiles(file);

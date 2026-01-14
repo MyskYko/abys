@@ -51,4 +51,10 @@ if(ABYS_ENABLE_TESTS)
   add_executable(abys_smoke tests/smoke.cpp)
   target_link_libraries(abys_smoke PRIVATE abys_core)
   add_test(NAME abys_smoke COMMAND abys_smoke)
+
+  add_executable(abys_smoke_lowering_continuous_assign
+                 tests/smoke_lowering_continuous_assign.cpp)
+  target_link_libraries(abys_smoke_lowering_continuous_assign PRIVATE abys_core)
+  add_test(NAME abys_smoke_lowering_continuous_assign
+           COMMAND abys_smoke_lowering_continuous_assign)
 endif()

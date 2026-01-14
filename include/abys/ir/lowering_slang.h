@@ -12,9 +12,11 @@
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
 #include "slang/ast/expressions/ConversionExpression.h"
+#include "slang/ast/expressions/OperatorExpressions.h"
 #include "slang/ast/expressions/MiscExpressions.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
+#include "slang/ast/symbols/MemberSymbols.h"
 #include "slang/ast/symbols/PortSymbols.h"
 #include "slang/ast/types/Type.h"
 #include "slang/driver/Driver.h"
@@ -76,6 +78,72 @@ namespace abys::ir {
       expr_stack_.push_back(id);
     }
 
+    void handle(const slang::ast::BinaryExpression &expr) {
+      this->visitDefault(expr);
+      assert(expr_stack_.size() >= 2);
+      ExprId rhs = expr_stack_.back();
+      expr_stack_.pop_back();
+      ExprId lhs = expr_stack_.back();
+      expr_stack_.pop_back();
+      ExprNode::Op op = ExprNode::Op::kConst;
+      switch (expr.op) {
+      case slang::ast::BinaryOperator::BinaryAnd:
+        op = ExprNode::Op::kAnd;
+        break;
+      case slang::ast::BinaryOperator::BinaryOr:
+        op = ExprNode::Op::kOr;
+        break;
+      case slang::ast::BinaryOperator::BinaryXor:
+        op = ExprNode::Op::kXor;
+        break;
+      case slang::ast::BinaryOperator::Add:
+        op = ExprNode::Op::kAdd;
+        break;
+      case slang::ast::BinaryOperator::Subtract:
+        op = ExprNode::Op::kSub;
+        break;
+      case slang::ast::BinaryOperator::Multiply:
+        op = ExprNode::Op::kMul;
+        break;
+      case slang::ast::BinaryOperator::LogicalShiftLeft:
+      case slang::ast::BinaryOperator::ArithmeticShiftLeft:
+        op = ExprNode::Op::kShl;
+        break;
+      case slang::ast::BinaryOperator::LogicalShiftRight:
+        op = ExprNode::Op::kShr;
+        break;
+      case slang::ast::BinaryOperator::ArithmeticShiftRight:
+        op = ExprNode::Op::kAshr;
+        break;
+      case slang::ast::BinaryOperator::Equality:
+      case slang::ast::BinaryOperator::CaseEquality:
+        op = ExprNode::Op::kEq;
+        break;
+      case slang::ast::BinaryOperator::Inequality:
+      case slang::ast::BinaryOperator::CaseInequality:
+        op = ExprNode::Op::kNeq;
+        break;
+      case slang::ast::BinaryOperator::LessThan:
+        op = ExprNode::Op::kLt;
+        break;
+      case slang::ast::BinaryOperator::LessThanEqual:
+        op = ExprNode::Op::kLe;
+        break;
+      case slang::ast::BinaryOperator::GreaterThan:
+        op = ExprNode::Op::kGt;
+        break;
+      case slang::ast::BinaryOperator::GreaterThanEqual:
+        op = ExprNode::Op::kGe;
+        break;
+      default:
+        throw std::logic_error(
+            std::string("Unhandled binary operator: ")
+            + std::string(slang::ast::OpInfo::getText(expr.op)));
+      }
+      ExprId id = builder_.create_binary(op, lhs, rhs, expr_width(expr), expr_sign(expr));
+      expr_stack_.push_back(id);
+    }
+
     ExprId get_root() {
       assert(!expr_stack_.empty());
       assert(expr_stack_.size() == 1);
@@ -134,6 +202,12 @@ namespace abys::ir {
       assert(expr.kind == slang::ast::ExpressionKind::NamedValue);
       const auto &named = expr.as<slang::ast::NamedValueExpression>();
       return std::string(named.symbol.name);
+    }
+
+    std::string extract_lhs_name(const slang::ast::Expression &expr) {
+      assert(expr.kind == slang::ast::ExpressionKind::Assignment);
+      const auto &assign = expr.as<slang::ast::AssignmentExpression>();
+      return extract_named_value(assign.left());
     }
 
     std::string extract_output_named_value(const slang::ast::Expression &expr) {
@@ -246,9 +320,26 @@ namespace abys::ir {
 	builder_.finalize_node_input(module_id, node_id);
       }
     }
+
+    void handle(const slang::ast::ContinuousAssignSymbol &symbol) {
+      const auto &assign = symbol.getAssignment();
+      assert(assign.kind == slang::ast::ExpressionKind::Assignment);
+      const auto &assign_expr = assign.as<slang::ast::AssignmentExpression>();
+      const std::string output_name = extract_named_value(assign_expr.left());
+      (void)create_expr_node(assign_expr.right(), output_name);
+    }
     
     void handle(const slang::ast::RootSymbol &symbol) {
       this->visitDefault(symbol);
+    }
+
+    void handle(const slang::ast::CompilationUnitSymbol &symbol) {
+      this->visitDefault(symbol);
+    }
+
+    void handle(const slang::ast::VariableSymbol &symbol) {
+      // TODO: implement this for debugging (mismatch, unused, or nondeclared)
+      (void)symbol;
     }
   };
   

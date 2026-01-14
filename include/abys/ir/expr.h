@@ -24,6 +24,7 @@ struct ExprNode {
     kMul,
     kShl,
     kShr,
+    kAshr,
     kEq,
     kNeq,
     kLt,
