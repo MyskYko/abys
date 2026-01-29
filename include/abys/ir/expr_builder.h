@@ -5,13 +5,13 @@
 #include <vector>
 
 #include "abys/ir/expr.h"
-#include "abys/ir/tig.h"
 
 namespace abys::ir {
 
 class ExprBuilder {
 public:
   explicit ExprBuilder(std::vector<ExprNode> &nodes);
+  explicit ExprBuilder(std::vector<ExprNode> &nodes, std::vector<ExprInput> &inputs, std::unordered_map<std::string, ExprId> &name_map);
 
   ExprId find_or_create_input(std::string name, SignalWidth width, bool sign);
 
@@ -23,23 +23,18 @@ public:
   ExprId create_nary(ExprNode::Op op, std::vector<ExprId> operands, SignalWidth width, bool sign);
   ExprId create_convert(ExprId operand, SignalWidth width, bool sign);
 
-  SignalWidth get_width(ExprId expr_id);
-  bool get_sign(ExprId expr_id);
-
   template<typename Func>
   void for_each_input(Func &&func);    
 
 private:
   ExprId create_node();
 
-  struct ExprInput {
-    ExprId id;
-    std::string name;
-  };
-
+  std::vector<ExprInput> owned_inputs_;
+  std::unordered_map<std::string, ExprId> owned_name_map_;
+  
   std::vector<ExprNode> &nodes_;
-  std::vector<ExprInput> inputs_;
-  std::unordered_map<std::string, ExprId> input_map_;
+  std::vector<ExprInput> &inputs_;
+  std::unordered_map<std::string, ExprId> &name_map_;
 };
 
 template<typename Func>

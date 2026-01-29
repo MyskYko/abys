@@ -21,8 +21,9 @@
 #include "slang/ast/types/Type.h"
 #include "slang/driver/Driver.h"
 
-#include "abys/ir/tig_builder.h"
 #include "abys/ir/expr_builder.h"
+#include "abys/ir/stmt_builder.h"
+#include "abys/ir/tig_builder.h"
 
 namespace abys::ir {
 
@@ -45,6 +46,12 @@ namespace abys::ir {
   
   static inline bool expr_sign(const slang::ast::Expression &expr) {
     return expr.type->isSigned();
+  }
+
+  std::string extract_named_value(const slang::ast::Expression &expr) {
+    assert(expr.kind == slang::ast::ExpressionKind::NamedValue);
+    const auto &named = expr.as<slang::ast::NamedValueExpression>();
+    return std::string(named.symbol.name);
   }
 
   template <typename Builder>
@@ -150,6 +157,78 @@ namespace abys::ir {
       return expr_stack_.back();
     }
   };
+
+  ExprId build_expr(const slang::ast::Expression &expr, ExprBuilder &expr_builder) {
+    SlangExprLoweringVisitor<ExprBuilder> expr_visitor(expr_builder);
+    expr.visit(expr_visitor);
+    return expr_visitor.get_root();
+  }
+
+
+  template <typename Builder>
+  class SlangStmtLoweringVisitor final
+    : public slang::ast::ASTVisitor<SlangStmtLoweringVisitor<Builder>, true, false, false, true> {
+  private:
+    Builder &builder_;
+
+    std::string extract_lhs_name(const slang::ast::Expression &expr) {
+      assert(expr.kind == slang::ast::ExpressionKind::Assignment);
+      const auto &assign = expr.as<slang::ast::AssignmentExpression>();
+      return extract_named_value(assign.left());
+    }
+
+ public:
+    explicit SlangStmtLoweringVisitor(Builder &builder) : builder_(builder) {}
+
+
+    template<typename T>
+    void handle(const T&) {
+      throw std::logic_error(
+                             std::string("Unhandled AST node: ") + typeid(T).name()
+                             );
+    }
+
+    void handle(const slang::ast::ExpressionStatement &stmt) {
+      if (stmt.expr.kind != slang::ast::ExpressionKind::Assignment) {
+	throw std::logic_error("Non-assignment expression statement is unsupported");
+      }
+      const auto &assign = stmt.expr.as<slang::ast::AssignmentExpression>();
+      assert(!assign.isCompound()); // we need to handle this later
+      ExprBuilder expr_builder(builder_.expr_nodes(), builder_.inputs(), builder_.current_values());
+      ExprId expr_id = build_expr(assign.right(), expr_builder);
+      std::string output_name = extract_lhs_name(assign);
+      bool nonblocking = assign.isNonBlocking();
+      if (!nonblocking) {
+	builder_.current_values()[output_name] = expr_id;
+      }
+      builder_.output_names().push_back(output_name);
+      builder_.output_nonblocking().push_back(nonblocking);
+      builder_.output_ids().push_back(expr_id);
+    }
+    
+    void handle(const slang::ast::StatementList &stmt) {
+      this->visitDefault(stmt);
+    }
+    
+    void handle(const slang::ast::BlockStatement &stmt) {
+      builder_.create_context();
+      this->visitDefault(stmt);
+      builder_.merge_context();
+    }
+    
+    void handle(const slang::ast::TimedStatement &stmt) {
+      if(!builder_.is_root_context()) {
+        throw std::logic_error("TimedStatement in a non-root context");
+      }
+      if(!builder_.is_ff() && !builder_.is_undecided()) {
+        throw std::logic_error("TimedStatement in always_comb or always_latch");
+      }
+      // TODO: reject nested timing (timing not stored yet i.e. empty).
+      // TODO: record timing control
+      this->visitDefault(stmt);
+    }
+
+  };
     
   template <typename Builder>
     class SlangLoweringVisitor final
@@ -175,12 +254,6 @@ namespace abys::ir {
       return module_stack_.back();
     }
 
-    ExprId build_expr(const slang::ast::Expression &expr, ExprBuilder &expr_builder) {
-      SlangExprLoweringVisitor<ExprBuilder> expr_visitor(expr_builder);
-      expr.visit(expr_visitor);
-      return expr_visitor.get_root();
-    }
-
     NodeId create_expr_node(const slang::ast::Expression &expr, std::string output_name = "") {
       const ModuleId module_id = current_module_id();
       const NodeId node_id = builder_.create_operation(module_id);
@@ -189,8 +262,7 @@ namespace abys::ir {
       expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
         builder_.add_node_input_spec(module_id, node_id, name, width, sign);
       });
-      builder_.add_node_output(module_id, node_id, std::move(output_name),
-                               expr_builder.get_width(expr_id), expr_builder.get_sign(expr_id));
+      builder_.add_node_output_expr(module_id, node_id, std::move(output_name), expr_id);
       return node_id;
     }
 
@@ -198,18 +270,6 @@ namespace abys::ir {
     explicit SlangLoweringVisitor(Builder &builder) : builder_(builder) {}
 
   private:
-    std::string extract_named_value(const slang::ast::Expression &expr) {
-      assert(expr.kind == slang::ast::ExpressionKind::NamedValue);
-      const auto &named = expr.as<slang::ast::NamedValueExpression>();
-      return std::string(named.symbol.name);
-    }
-
-    std::string extract_lhs_name(const slang::ast::Expression &expr) {
-      assert(expr.kind == slang::ast::ExpressionKind::Assignment);
-      const auto &assign = expr.as<slang::ast::AssignmentExpression>();
-      return extract_named_value(assign.left());
-    }
-
     std::string extract_output_named_value(const slang::ast::Expression &expr) {
       assert(expr.kind == slang::ast::ExpressionKind::Assignment);
       const auto &assign = expr.as<slang::ast::AssignmentExpression>();
@@ -341,6 +401,31 @@ namespace abys::ir {
       // TODO: implement this for debugging (mismatch, unused, or nondeclared)
       (void)symbol;
     }
+
+    void handle(const slang::ast::ProceduralBlockSymbol &symbol) {
+      StmtBuilder stmt_builder;
+      switch (symbol.procedureKind) {
+      case slang::ast::ProceduralBlockKind::AlwaysComb: stmt_builder.set_comb(); break;
+      case slang::ast::ProceduralBlockKind::AlwaysLatch: stmt_builder.set_latch(); break;
+      case slang::ast::ProceduralBlockKind::AlwaysFF: stmt_builder.set_ff(); break;
+      case slang::ast::ProceduralBlockKind::Always: stmt_builder.set_comb_or_latch(); break;
+      default: throw std::logic_error("Unknown procedural block kind");
+      }
+      SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder);
+      const slang::ast::Statement& stmt = symbol.getBody();
+      stmt.visit(stmt_visitor);
+      const ModuleId module_id = current_module_id();
+      const NodeId node_id = builder_.create_operation(module_id);
+      stmt_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
+        builder_.add_node_input_spec(module_id, node_id, name, width, sign);
+      });
+      stmt_builder.transfer_expr_nodes(builder_.get_expr_nodes_ref(module_id, node_id));
+      stmt_builder.for_each_output([&](const std::string &name, ExprId expr_id) {
+	// TODO: think about how to handle sequential stuff
+	builder_.add_node_output_expr(module_id, node_id, name, expr_id);
+      });
+    }
+    
   };
   
   

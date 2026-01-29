@@ -2,16 +2,18 @@
 
 namespace abys::ir {
 
-ExprBuilder::ExprBuilder(std::vector<ExprNode> &nodes) : nodes_(nodes) {}
+ExprBuilder::ExprBuilder(std::vector<ExprNode> &nodes) : nodes_(nodes), inputs_(owned_inputs_), name_map_(owned_name_map_) {}
+
+ExprBuilder::ExprBuilder(std::vector<ExprNode> &nodes, std::vector<ExprInput> &inputs, std::unordered_map<std::string, ExprId> &name_map) : nodes_(nodes), inputs_(inputs), name_map_(name_map) {}
 
 ExprId ExprBuilder::find_or_create_input(std::string name, SignalWidth width, bool sign) {
-  auto it = input_map_.find(name);
-  if(it != input_map_.end()) {
+  auto it = name_map_.find(name);
+  if(it != name_map_.end()) {
     return it->second;
   }
   const ExprId id = create_node();
   const PortIndex port_idx = static_cast<PortIndex>(inputs_.size());
-  input_map_[name] = id;
+  name_map_[name] = id;
   inputs_.push_back({id, std::move(name)});
   auto &node = nodes_[id];
   node.op = ExprNode::Op::kInput;
@@ -79,14 +81,6 @@ ExprId ExprBuilder::create_nary(ExprNode::Op op, std::vector<ExprId> operands,
   node.sign = sign;
   node.operands = std::move(operands);
   return id;
-}
-
-SignalWidth ExprBuilder::get_width(ExprId expr_id) {
-  return nodes_[expr_id].width;
-}
-  
-bool ExprBuilder::get_sign(ExprId expr_id) {
-  return nodes_[expr_id].sign;
 }
 
 ExprId ExprBuilder::create_node() {

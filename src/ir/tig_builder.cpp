@@ -121,6 +121,17 @@ void TigBuilder::add_node_output(ModuleId module_id, NodeId node_id, std::string
   const PortIndex port_idx = static_cast<PortIndex>(node.outputs.size());
   node.outputs.emplace_back(std::move(name), width, sign);
   add_signal(module_id, node.outputs[port_idx].name, {node_id, port_idx});
+  node.expr_roots.push_back(kInvalidExprId); // placeholder
+}
+
+void TigBuilder::add_node_output_expr(ModuleId module_id, NodeId node_id, std::string name, ExprId expr_id) {
+  Module &module = design_.modules[module_id];
+  Node &node = module.nodes[node_id];
+  const ExprNode &expr_node = node.expr_nodes[expr_id];
+  const PortIndex port_idx = static_cast<PortIndex>(node.outputs.size());
+  node.outputs.emplace_back(std::move(name), expr_node.width, expr_node.sign);
+  add_signal(module_id, node.outputs[port_idx].name, {node_id, port_idx});
+  node.expr_roots.push_back(expr_id);
 }
 
 std::vector<ExprNode> &TigBuilder::get_expr_nodes_ref(ModuleId module_id, NodeId node_id) {

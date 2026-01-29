@@ -23,6 +23,7 @@ set(ABYS_CORE_SOURCES
   src/version.cpp
   src/frontend_slang.cpp
   src/ir/expr_builder.cpp
+  src/ir/stmt_builder.cpp
   src/ir/tig_builder.cpp
 )
 find_package(slang CONFIG REQUIRED)
