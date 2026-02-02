@@ -21,6 +21,7 @@ public:
   ExprId create_ternary(ExprNode::Op op, ExprId a, ExprId b, ExprId c, SignalWidth width,
                         bool sign);
   ExprId create_nary(ExprNode::Op op, std::vector<ExprId> operands, SignalWidth width, bool sign);
+  ExprId create_mux(ExprId a, ExprId b, ExprId c);
   ExprId create_convert(ExprId operand, SignalWidth width, bool sign);
 
   template<typename Func>

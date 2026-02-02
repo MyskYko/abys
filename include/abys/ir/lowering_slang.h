@@ -176,7 +176,7 @@ namespace abys::ir {
       const auto &assign = expr.as<slang::ast::AssignmentExpression>();
       return extract_named_value(assign.left());
     }
-
+    
  public:
     explicit SlangStmtLoweringVisitor(Builder &builder) : builder_(builder) {}
 
@@ -206,6 +206,32 @@ namespace abys::ir {
       builder_.output_ids().push_back(expr_id);
     }
     
+    void handle(const slang::ast::ConditionalStatement &stmt) {
+      ExprBuilder expr_builder(builder_.expr_nodes(), builder_.inputs(), builder_.current_values());
+      std::vector<ExprId> cond_ids;
+      for (const auto &cond : stmt.conditions) {
+	ExprId cond_id = build_expr(*cond.expr, expr_builder);
+	cond_ids.push_back(cond_id);
+      }
+      assert(!cond_ids.empty());
+      ExprId cond_id = kInvalidExprId;
+      if (cond_ids.size() > 1) {
+	cond_id = expr_builder.create_nary(ExprNode::Op::kAnd, std::move(cond_ids), 1, false);
+      } else {
+	cond_id = cond_ids[0];
+      }
+      builder_.create_context();
+      stmt.ifTrue.visit(*this);
+      builder_.stack_context();
+      builder_.create_context();
+      if (stmt.ifFalse) {
+	stmt.ifFalse->visit(*this);
+      }
+      builder_.stack_context();
+      builder_.merge_conditional(cond_id);
+      // TODO: handle nested case -> requires big modification. take expr_nodes as input of stmtbuilder. inputs are shared across all contexts. exprbuilder is still created on demand with context's current_values. context stores output info as well as current values.  current_values should be copied from parent's current values.
+    }
+    
     void handle(const slang::ast::StatementList &stmt) {
       this->visitDefault(stmt);
     }
@@ -215,6 +241,20 @@ namespace abys::ir {
       this->visitDefault(stmt);
       builder_.merge_context();
     }
+
+    void handle(const slang::ast::SignalEventControl &ev) {
+      ExprBuilder expr_builder(builder_.expr_nodes(), builder_.inputs(), builder_.current_values());
+      ExprId expr_id = build_expr(ev.expr, expr_builder);
+      ExprId iff_id = ev.iffCondition ? build_expr(*ev.iffCondition, expr_builder) : kInvalidExprId;
+      const bool posedge = ev.edge == slang::ast::EdgeKind::PosEdge;
+      const bool negedge = ev.edge == slang::ast::EdgeKind::NegEdge;
+      const bool both = ev.edge == slang::ast::EdgeKind::BothEdges;
+      builder_.add_timing(expr_id, iff_id, posedge || both, negedge || both);
+    }
+    
+    void handle(const slang::ast::EventListControl &ev) {
+      this->visitDefault(ev);
+    }
     
     void handle(const slang::ast::TimedStatement &stmt) {
       if(!builder_.is_root_context()) {
@@ -223,8 +263,9 @@ namespace abys::ir {
       if(!builder_.is_ff() && !builder_.is_undecided()) {
         throw std::logic_error("TimedStatement in always_comb or always_latch");
       }
-      // TODO: reject nested timing (timing not stored yet i.e. empty).
-      // TODO: record timing control
+      if(builder_.has_timing()) {
+	throw std::logic_error("Nested TimedStatement");
+      }
       this->visitDefault(stmt);
     }
 

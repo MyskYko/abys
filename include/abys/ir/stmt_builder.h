@@ -31,9 +31,15 @@ namespace abys::ir {
     bool is_root_context() const;
     bool is_ff() const;
     bool is_undecided() const;
+    
+    bool has_timing() const;
+
+    void add_timing(ExprId expr_id, ExprId iff_id, bool posedge, bool negedge);
 
     void create_context();
+    void stack_context();
     void merge_context();
+    void merge_conditional(ExprId cond_id);
 
     // TODO: merge contexts
 
@@ -99,6 +105,25 @@ namespace abys::ir {
     };
 
     std::vector<Context> contexts_;
+    std::vector<Context> context_stack_;
+
+    void transfer_expr_nodes(const Context& from, std::unordered_map<ExprId, ExprId>& m);
+    void transfer_output(const Context& from, size_t i, ExprId expr_id);
+
+    enum class EdgeKind {
+      kNone,
+      kPosedge,
+      kNegedge,
+      kBothEdges
+    };
+    
+    struct TimingEvent {
+      EdgeKind edge = EdgeKind::kNone;
+      ExprId expr_id = kInvalidExprId;
+      ExprId iff_id = kInvalidExprId;
+    };
+    
+    std::vector<TimingEvent> timing_events_;
 
   };
   

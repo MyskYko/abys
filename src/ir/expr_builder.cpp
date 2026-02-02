@@ -1,3 +1,5 @@
+#include <cassert>
+
 #include "abys/ir/expr_builder.h"
 
 namespace abys::ir {
@@ -83,6 +85,34 @@ ExprId ExprBuilder::create_nary(ExprNode::Op op, std::vector<ExprId> operands,
   return id;
 }
 
+ExprId ExprBuilder::create_mux(ExprId cond_id, ExprId then_id, ExprId else_id) {
+  const ExprId id = create_node();
+  auto &node = nodes_[id];
+  node.op = ExprNode::Op::kMux;
+  if(then_id != kInvalidExprId && else_id != kInvalidExprId) {
+    const auto& then_node = nodes_[then_id];
+    const auto& else_node = nodes_[else_id];
+    assert(then_node.width == else_node.width);
+    assert(then_node.sign == else_node.sign);
+    node.width = then_node.width;
+    node.sign = then_node.sign;
+  } else if(then_id != kInvalidExprId) {
+    const auto& then_node = nodes_[then_id];
+    node.width = then_node.width;
+    node.sign = then_node.sign;
+  } else if(else_id != kInvalidExprId) {
+    const auto& else_node = nodes_[else_id];
+    node.width = else_node.width;
+    node.sign = else_node.sign;
+  } else {
+    assert(false);
+  }
+  node.operands.push_back(cond_id);
+  node.operands.push_back(then_id);
+  node.operands.push_back(else_id);
+  return id;
+}
+  
 ExprId ExprBuilder::create_node() {
   const ExprId id = static_cast<ExprId>(nodes_.size());
   nodes_.emplace_back();
