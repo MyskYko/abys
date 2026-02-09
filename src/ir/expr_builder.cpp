@@ -84,7 +84,7 @@ ExprId ExprBuilder::create_nary(ExprNode::Op op, std::vector<ExprId> operands,
   node.operands = std::move(operands);
   return id;
 }
-
+  
 ExprId ExprBuilder::create_mux(ExprId cond_id, ExprId then_id, ExprId else_id) {
   const ExprId id = create_node();
   auto &node = nodes_[id];
@@ -112,7 +112,46 @@ ExprId ExprBuilder::create_mux(ExprId cond_id, ExprId then_id, ExprId else_id) {
   node.operands.push_back(else_id);
   return id;
 }
-  
+
+ExprId ExprBuilder::create_list(std::vector<ExprId> operands) {
+  const ExprId id = create_node();
+  auto &node = nodes_[id];
+  node.op = ExprNode::Op::kList;
+  node.operands = std::move(operands);
+  return id;
+}
+
+ExprId ExprBuilder::create_case(ExprId case_id, const std::vector<ExprId>& case_values, const std::vector<ExprId>& data_ids, ExprId current_id) {
+  const ExprId id = create_node();
+  auto &node = nodes_[id];
+  node.op = ExprNode::Op::kCase;
+  node.operands.push_back(case_id);
+  bool is_first = true;
+  for (size_t i = 0; i < data_ids.size(); i++) {
+    ExprId data_id = data_ids[i];
+    if (data_id == kInvalidExprId) {
+      data_id = current_id;
+    }
+    if (data_id != kInvalidExprId) {
+      const auto& data_node = nodes_[data_id];
+      if (is_first) {
+        node.width = data_node.width;
+        node.sign = data_node.sign;
+        is_first = false;
+      } else {
+        assert(data_node.width == node.width);
+        assert(data_node.sign == node.sign);
+      }
+    }
+    if (i < case_values.size()) {
+      node.operands.push_back(case_values[i]);
+    }
+    node.operands.push_back(data_id);
+  }
+  assert(!is_first);
+  return id;
+}
+
 ExprId ExprBuilder::create_node() {
   const ExprId id = static_cast<ExprId>(nodes_.size());
   nodes_.emplace_back();

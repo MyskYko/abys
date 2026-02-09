@@ -1,20 +1,15 @@
 #include <cassert>
 
-#include "abys/ir/expr_builder.h"
 #include "abys/ir/stmt_builder.h"
 
 namespace abys::ir {
 
-  StmtBuilder::StmtBuilder() {
+  StmtBuilder::StmtBuilder(std::vector<ExprNode>& expr_nodes): expr_nodes_(expr_nodes) {
     contexts_.emplace_back();
   }
 
-  std::vector<ExprNode>& StmtBuilder::expr_nodes() {
-    return contexts_.back().expr_nodes;
-  }
-
-  std::vector<ExprInput>& StmtBuilder::inputs() {
-    return contexts_.back().inputs;
+  ExprBuilder StmtBuilder::make_expr_builder() {
+    return ExprBuilder(expr_nodes_, inputs_, current_values());
   }
 
   std::unordered_map<std::string, ExprId>& StmtBuilder::current_values() {
@@ -31,6 +26,10 @@ namespace abys::ir {
 
   std::vector<ExprId>& StmtBuilder::output_ids() {
     return contexts_.back().output_ids;
+  }
+
+  size_t StmtBuilder::get_context_stack_index() const {
+    return context_stack_.size();
   }
 
   void StmtBuilder::set_comb() {
@@ -77,38 +76,15 @@ namespace abys::ir {
   }
   
   void StmtBuilder::create_context() {
+    Context& ctx = contexts_.back();
     contexts_.emplace_back();
+    contexts_.back().current_values = ctx.current_values;
   }
 
   void StmtBuilder::stack_context() {
     assert(contexts_.size() > 1);
     context_stack_.push_back(std::move(contexts_.back()));
     contexts_.pop_back();    
-  }
-
-  void StmtBuilder::transfer_expr_nodes(const Context& from, std::unordered_map<ExprId, ExprId>& m) {
-    ExprBuilder expr_builder(expr_nodes(), inputs(), current_values());
-    // check inputs' current values & map if found, create and register otherwise
-    for (const auto& input : from.inputs) {
-      m[input.id] = expr_builder.find_or_create_input(input.name, from.expr_nodes[input.id].width, from.expr_nodes[input.id].sign);
-    }
-    // traverse and append non-input expr nodes
-    for (ExprId id = 0; id < static_cast<ExprId>(from.expr_nodes.size()); id++) {
-      const auto &node = from.expr_nodes[id];
-      if (node.op == ExprNode::Op::kInput) {
-	continue;
-      }
-      if (node.op == ExprNode::Op::kConst) {
-        m[id] = expr_builder.create_const(node.value, node.width, node.sign);	
-	continue;
-      }
-      std::vector<ExprId> ops;
-      ops.reserve(node.operands.size());
-      for (auto op : node.operands) {
-	ops.push_back(m.at(op));
-      }
-      m[id] = expr_builder.create_nary(node.op, std::move(ops), node.width, node.sign);
-    }
   }
 
   void StmtBuilder::transfer_output(const Context& from, size_t i, ExprId expr_id) {
@@ -124,15 +100,12 @@ namespace abys::ir {
     assert(contexts_.size() > 1);
     Context child = std::move(contexts_.back());
     contexts_.pop_back();
-    // map expr id in child to expr id in parent
-    std::unordered_map<ExprId, ExprId> m;
-    transfer_expr_nodes(child, m);
     // append outputs if not local & update their current values
     for (size_t i = 0; i < child.output_names.size(); i++) {
       if (child.local_names.count(child.output_names[i])) {
 	continue;
       }
-      transfer_output(child, i, m.at(child.output_ids[i]));
+      transfer_output(child, i, child.output_ids[i]);
     }
   }
 
@@ -142,9 +115,6 @@ namespace abys::ir {
     context_stack_.pop_back();
     Context then_ctx = std::move(context_stack_.back());
     context_stack_.pop_back();
-    std::unordered_map<ExprId, ExprId> then_map, else_map;
-    transfer_expr_nodes(then_ctx, then_map);
-    transfer_expr_nodes(else_ctx, else_map);
     // compute shared outputs
     std::unordered_set<std::string> then_outputs;
     for (size_t i = 0; i < then_ctx.output_names.size(); i++) {
@@ -157,23 +127,23 @@ namespace abys::ir {
       }
     }
     // append then/shared outputs if not local & update their current values
-    ExprBuilder expr_builder(expr_nodes(), inputs(), current_values());
+    ExprBuilder expr_builder = make_expr_builder();
     for (size_t i = 0; i < then_ctx.output_names.size(); i++) {
-      assert (then_ctx.local_names.empty());
+      assert (then_ctx.local_names.empty()); // assuming locals can only be declared in block, which removes local on merge
       const std::string& name = then_ctx.output_names[i];
       auto it = shared_output_to_else_index.find(name);
       ExprId new_id = kInvalidExprId;
       if (it != shared_output_to_else_index.end()) {
 	// shared
-	ExprId then_id = then_map.at(then_ctx.output_ids[i]);
-	ExprId else_id = else_map.at(else_ctx.output_ids[it->second]);
+	ExprId then_id = then_ctx.output_ids[i];
+	ExprId else_id = else_ctx.output_ids[it->second];
 	new_id = expr_builder.create_mux(cond_id, then_id, else_id);
 	if (then_ctx.output_nonblocking[i] != else_ctx.output_nonblocking[it->second]) {
 	  throw std::logic_error("Mixed blocking/nonblocking assignments to " + name);
 	}
       } else {
 	// not shared
-	ExprId then_id = then_map.at(then_ctx.output_ids[i]);
+	ExprId then_id = then_ctx.output_ids[i];
 	ExprId else_id = kInvalidExprId;
 	auto current_it = current_values().find(name);
 	if (current_it != current_values().end()) {
@@ -197,11 +167,67 @@ namespace abys::ir {
       if (current_it != current_values().end()) {
 	then_id = current_it->second;
       }
-      ExprId else_id = else_map.at(else_ctx.output_ids[i]);
+      ExprId else_id = else_ctx.output_ids[i];
       ExprId new_id = expr_builder.create_mux(cond_id, then_id, else_id);
       transfer_output(else_ctx, i, new_id);
     }
   }
 
+  void StmtBuilder::merge_case(ExprId case_id, const std::vector<ExprId>& case_values, size_t stack_index) {
+    size_t output_count = 0;
+    std::unordered_map<std::string, size_t> output_map;
+    std::vector<std::vector<ExprId>> case_output_ids;
+    std::vector<std::vector<bool>> case_output_nonblocking;
+    for (size_t j = 0; j < context_stack_.size() - stack_index; j++) {
+      const Context& ctx = context_stack_[j + stack_index];
+      for (size_t i = 0; i < ctx.output_names.size(); i++) {
+	const std::string& name = ctx.output_names[i];
+	auto it = output_map.find(name);
+	size_t output_index;
+	if (it == output_map.end()) {
+	  output_index = output_count;
+	  output_map[name] = output_count;
+	  output_count++;
+	  case_output_nonblocking.resize(output_count);
+	  case_output_ids.resize(output_count);
+	} else {
+	  output_index = it->second;
+	}
+	case_output_ids[output_index].resize(j + 1, kInvalidExprId);
+	case_output_ids[output_index][j] = ctx.output_ids[i];
+	case_output_nonblocking[output_index].resize(j + 1, false);
+	case_output_nonblocking[output_index][j] = ctx.output_nonblocking[i];
+      }
+    }
+    ExprBuilder expr_builder = make_expr_builder();
+    for (const auto& entry : output_map) {
+      ExprId current_id = kInvalidExprId;
+      auto current_it = current_values().find(entry.first);
+      if (current_it != current_values().end()) {
+	current_id = current_it->second;
+      }
+      ExprId new_id = expr_builder.create_case(case_id, case_values, case_output_ids[entry.second], current_id);
+      bool is_first = true;
+      bool nonblocking;
+      for (size_t j = 0; j < case_output_ids[entry.second].size(); j++) {
+	if (case_output_ids[entry.second][j] != kInvalidExprId) {
+	  if (is_first) {
+	    nonblocking = case_output_nonblocking[entry.second][j];
+	    is_first = false;
+	  } else {
+	    assert(nonblocking == case_output_nonblocking[entry.second][j]);
+	  }
+	}
+      }
+      assert(!is_first);
+      if (!nonblocking) {
+	current_values()[entry.first] = new_id;
+      }
+      output_names().push_back(entry.first);
+      output_nonblocking().push_back(nonblocking);
+      output_ids().push_back(new_id);
+    }
+    context_stack_.erase(context_stack_.begin() + stack_index, context_stack_.end());
+  }
 
 } // namespace abys::ir

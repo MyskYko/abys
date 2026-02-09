@@ -19,6 +19,8 @@ struct ExprNode {
     kOr,
     kXor,
     kMux,
+    kCase,
+    kList,
     kAdd,
     kSub,
     kMul,
@@ -40,7 +42,7 @@ struct ExprNode {
   SignalWidth width = 0;
   bool sign = false;
 
-  // for constants
+  // for constants (TODO: use simpler structure)
   std::string value;
 
   // for signals

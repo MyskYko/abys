@@ -23,6 +23,8 @@ public:
   ExprId create_nary(ExprNode::Op op, std::vector<ExprId> operands, SignalWidth width, bool sign);
   ExprId create_mux(ExprId a, ExprId b, ExprId c);
   ExprId create_convert(ExprId operand, SignalWidth width, bool sign);
+  ExprId create_list(std::vector<ExprId> operands);
+  ExprId create_case(ExprId case_id, const std::vector<ExprId>& case_values, const std::vector<ExprId>& data_ids, ExprId current_id);
 
   template<typename Func>
   void for_each_input(Func &&func);    

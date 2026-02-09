@@ -85,6 +85,18 @@ namespace abys::ir {
       expr_stack_.push_back(id);
     }
 
+    void handle(const slang::ast::IntegerLiteral &expr) {
+      const slang::SVInt v = expr.getValue();
+      ExprId id = builder_.create_const(v.toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr));
+      expr_stack_.push_back(id);
+    }
+
+    void handle(const slang::ast::UnbasedUnsizedIntegerLiteral &expr) {
+      const slang::SVInt v = expr.getValue();
+      ExprId id = builder_.create_const(v.toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr));
+      expr_stack_.push_back(id);
+    }
+    
     void handle(const slang::ast::BinaryExpression &expr) {
       this->visitDefault(expr);
       assert(expr_stack_.size() >= 2);
@@ -194,7 +206,7 @@ namespace abys::ir {
       }
       const auto &assign = stmt.expr.as<slang::ast::AssignmentExpression>();
       assert(!assign.isCompound()); // we need to handle this later
-      ExprBuilder expr_builder(builder_.expr_nodes(), builder_.inputs(), builder_.current_values());
+      ExprBuilder expr_builder = builder_.make_expr_builder();
       ExprId expr_id = build_expr(assign.right(), expr_builder);
       std::string output_name = extract_lhs_name(assign);
       bool nonblocking = assign.isNonBlocking();
@@ -207,7 +219,7 @@ namespace abys::ir {
     }
     
     void handle(const slang::ast::ConditionalStatement &stmt) {
-      ExprBuilder expr_builder(builder_.expr_nodes(), builder_.inputs(), builder_.current_values());
+      ExprBuilder expr_builder = builder_.make_expr_builder();
       std::vector<ExprId> cond_ids;
       for (const auto &cond : stmt.conditions) {
 	ExprId cond_id = build_expr(*cond.expr, expr_builder);
@@ -229,7 +241,35 @@ namespace abys::ir {
       }
       builder_.stack_context();
       builder_.merge_conditional(cond_id);
-      // TODO: handle nested case -> requires big modification. take expr_nodes as input of stmtbuilder. inputs are shared across all contexts. exprbuilder is still created on demand with context's current_values. context stores output info as well as current values.  current_values should be copied from parent's current values.
+    }
+
+    void handle(const slang::ast::CaseStatement &stmt) {
+      size_t index = builder_.get_context_stack_index();
+      ExprBuilder expr_builder = builder_.make_expr_builder();
+      ExprId case_id = build_expr(stmt.expr, expr_builder);
+      std::vector<ExprId> case_values;
+      for (auto &item : stmt.items) {
+	std::vector<ExprId> values;
+	for (auto *v : item.expressions) {
+	  values.push_back(build_expr(*v, expr_builder));
+	}
+	ExprId value_id = kInvalidExprId;
+	if (values.size() > 1) {
+	  value_id = expr_builder.create_list(std::move(values));
+	} else {
+	  value_id = values[0];
+	}
+	case_values.push_back(value_id);
+	builder_.create_context();
+	item.stmt->visit(*this);
+	builder_.stack_context();
+      }
+      builder_.create_context();
+      if (stmt.defaultCase) {
+	stmt.defaultCase->visit(*this);
+      }
+      builder_.stack_context();
+      builder_.merge_case(case_id, case_values, index);
     }
     
     void handle(const slang::ast::StatementList &stmt) {
@@ -243,7 +283,7 @@ namespace abys::ir {
     }
 
     void handle(const slang::ast::SignalEventControl &ev) {
-      ExprBuilder expr_builder(builder_.expr_nodes(), builder_.inputs(), builder_.current_values());
+      ExprBuilder expr_builder = builder_.make_expr_builder();
       ExprId expr_id = build_expr(ev.expr, expr_builder);
       ExprId iff_id = ev.iffCondition ? build_expr(*ev.iffCondition, expr_builder) : kInvalidExprId;
       const bool posedge = ev.edge == slang::ast::EdgeKind::PosEdge;
@@ -444,7 +484,9 @@ namespace abys::ir {
     }
 
     void handle(const slang::ast::ProceduralBlockSymbol &symbol) {
-      StmtBuilder stmt_builder;
+      const ModuleId module_id = current_module_id();
+      const NodeId node_id = builder_.create_operation(module_id);
+      StmtBuilder stmt_builder(builder_.get_expr_nodes_ref(module_id, node_id));
       switch (symbol.procedureKind) {
       case slang::ast::ProceduralBlockKind::AlwaysComb: stmt_builder.set_comb(); break;
       case slang::ast::ProceduralBlockKind::AlwaysLatch: stmt_builder.set_latch(); break;
@@ -455,12 +497,9 @@ namespace abys::ir {
       SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder);
       const slang::ast::Statement& stmt = symbol.getBody();
       stmt.visit(stmt_visitor);
-      const ModuleId module_id = current_module_id();
-      const NodeId node_id = builder_.create_operation(module_id);
       stmt_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
         builder_.add_node_input_spec(module_id, node_id, name, width, sign);
       });
-      stmt_builder.transfer_expr_nodes(builder_.get_expr_nodes_ref(module_id, node_id));
       stmt_builder.for_each_output([&](const std::string &name, ExprId expr_id) {
 	// TODO: think about how to handle sequential stuff
 	builder_.add_node_output_expr(module_id, node_id, name, expr_id);

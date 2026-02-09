@@ -6,22 +6,22 @@
 #include <vector>
 #include <stdexcept>
 
-#include "abys/ir/expr.h"
+#include "abys/ir/expr_builder.h"
 #include "abys/ir/tig.h"
 
 namespace abys::ir {
 
   class StmtBuilder {
   public:
-    explicit StmtBuilder();
+    explicit StmtBuilder(std::vector<ExprNode>& expr_nodes);
     
-    std::vector<ExprNode>& expr_nodes();
-    std::vector<ExprInput>& inputs();
+    ExprBuilder make_expr_builder();
     std::unordered_map<std::string, ExprId>& current_values();
     std::vector<std::string>& output_names();
     std::vector<bool>& output_nonblocking();
     std::vector<ExprId>& output_ids();
-
+    size_t get_context_stack_index() const;
+    
     // building
     void set_comb();
     void set_latch();
@@ -40,22 +40,17 @@ namespace abys::ir {
     void stack_context();
     void merge_context();
     void merge_conditional(ExprId cond_id);
+    void merge_case(ExprId case_id, const std::vector<ExprId>& case_values, size_t index);
 
     // TODO: merge contexts
 
     // API for exporting info for creating a tig node
     template<typename Func>
     void for_each_input(Func &&func) {
-      for (const auto &in : inputs()) {
-	const auto &node = expr_nodes()[in.id];
+      for (const auto &in : inputs_) {
+	const auto &node = expr_nodes_[in.id];
 	func(in.name, node.width, node.sign);
       }
-    }
-
-    void transfer_expr_nodes(std::vector<ExprNode>& out) {
-      auto &nodes = expr_nodes();
-      out.insert(out.end(), std::make_move_iterator(nodes.begin()), std::make_move_iterator(nodes.end()));
-      nodes.clear();
     }
 
     template<typename Func>
@@ -84,6 +79,9 @@ namespace abys::ir {
     }
 
   private:
+    std::vector<ExprNode>& expr_nodes_;
+    std::vector<ExprInput> inputs_;
+
     enum class Policy {
       Comb,
       Latch,
@@ -95,8 +93,6 @@ namespace abys::ir {
     Policy policy_ = Policy::Undecided;
     
     struct Context {
-      std::vector<ExprNode> expr_nodes;
-      std::vector<ExprInput> inputs;
       std::unordered_map<std::string, ExprId> current_values;
       std::vector<std::string> output_names;
       std::vector<bool> output_nonblocking;
@@ -107,7 +103,6 @@ namespace abys::ir {
     std::vector<Context> contexts_;
     std::vector<Context> context_stack_;
 
-    void transfer_expr_nodes(const Context& from, std::unordered_map<ExprId, ExprId>& m);
     void transfer_output(const Context& from, size_t i, ExprId expr_id);
 
     enum class EdgeKind {
