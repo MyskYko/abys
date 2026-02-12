@@ -29,7 +29,8 @@ namespace abys::ir {
 	NodeId node_id = kInvalidNodeId;
 	PortIndex port_idx = 0;
       };
-      
+
+      // TODO: are Ri, Ro necessary?
       enum class NodeKind {
 	kInstance,
 	kPi,
@@ -37,6 +38,11 @@ namespace abys::ir {
 	kRi,
 	kRo,
 	kOp,
+	kFf,
+	kLatch,
+        kProhibitedLatch,
+	kMemory,
+	kMacro,
 	kUnknown,
       };
       
@@ -52,34 +58,13 @@ namespace abys::ir {
 	};
 	std::vector<Output> outputs;
 	std::vector<ExprId> expr_roots;
-	std::vector<ExprNode> expr_nodes;
+	ExprGraph expr_graph;
       };
       
-      enum class BlockKind {
-	kMemory,
-	kLatch,
-	kFf,
-	kMacro,
-	kUnknown,
-      };
-      
-      struct Block {
-	BlockKind kind = BlockKind::kUnknown;
-	std::string name;
-	std::string impl_name;
-	std::vector<Port> input_ports;
-	std::vector<Port> output_ports;
-	std::vector<NodeId> inputs;
-	std::vector<NodeId> outputs;
-	std::unordered_map<std::string, std::string> params;
-	std::unordered_map<std::string, std::string> attributes;
-      };
-
       std::string name;
       std::vector<Port> input_ports;
       std::vector<Port> output_ports;
       std::vector<Node> nodes;
-      std::vector<Block> blocks;
       std::unordered_map<std::string, EdgeRef> signal_map;
     };
 

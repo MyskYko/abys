@@ -13,13 +13,13 @@ namespace abys::ir {
 
   class StmtBuilder {
   public:
-    explicit StmtBuilder(std::vector<ExprNode>& expr_nodes);
+    explicit StmtBuilder(ExprGraph &expr_graph);
     
-    ExprBuilder make_expr_builder();
-    std::unordered_map<std::string, ExprId>& current_values();
-    std::vector<std::string>& output_names();
-    std::vector<bool>& output_nonblocking();
-    std::vector<ExprId>& output_ids();
+    ExprBuilder make_expr_builder(); // TODO: maybe this can be made per context when it's open
+    std::unordered_map<std::string, ExprId> &current_values();
+    std::vector<std::string> &output_names();
+    std::vector<bool> &output_nonblocking();
+    std::vector<ExprId> &output_ids();
     size_t get_context_stack_index() const;
     
     // building
@@ -29,6 +29,7 @@ namespace abys::ir {
     void set_ff();
     
     bool is_root_context() const;
+    bool is_comb() const;
     bool is_ff() const;
     bool is_undecided() const;
     
@@ -40,21 +41,26 @@ namespace abys::ir {
     void stack_context();
     void merge_context();
     void merge_conditional(ExprId cond_id);
-    void merge_case(ExprId case_id, const std::vector<ExprId>& case_values, size_t index);
-
-    // TODO: merge contexts
+    void merge_case(ExprId case_id, const std::vector<ExprId> &case_values, size_t index);
 
     // API for exporting info for creating a tig node
+    ExprId get_clock();
+    
+    ExprId compute_missing_path(ExprId expr_id, ExprBuilder &expr_builder) const;
+    
     template<typename Func>
-    void for_each_input(Func &&func) {
-      for (const auto &in : inputs_) {
-	const auto &node = expr_nodes_[in.id];
+    void for_each_input(Func &&func) const {
+      for (const auto &in : expr_graph_.inputs) {
+	const auto &node = expr_graph_.nodes[in.id];
 	func(in.name, node.width, node.sign);
       }
     }
 
     template<typename Func>
     void for_each_output(Func &&func) {
+      assert(!is_undecided()); // we don't allow always without any timing
+      bool has_latch = false;
+      ExprBuilder expr_builder = make_expr_builder();
       struct OutputInfo {
 	ExprId expr_id = 0;
         bool seen_blocking = false;
@@ -74,13 +80,22 @@ namespace abys::ir {
 	if (kv.second.seen_blocking && kv.second.seen_nonblocking) {
 	  throw std::logic_error("Mixed blocking and nonblocking assignments to " + kv.first);
 	}
-	func(kv.first, kv.second.expr_id);
+        ExprId enable_id = kInvalidExprId;
+        if (!is_ff()) {
+          const ExprId miss_id = compute_missing_path(kv.second.expr_id, expr_builder);
+          if (miss_id != kInvalidExprId) {
+            has_latch = true;
+            enable_id = expr_builder.create_logical_not(miss_id);
+          }
+        }
+	func(kv.first, kv.second.expr_id, enable_id);
       }
+      // TODO: warn if always_latch && !has_latch
+      (void)has_latch;
     }
 
   private:
-    std::vector<ExprNode>& expr_nodes_;
-    std::vector<ExprInput> inputs_;
+    ExprGraph &expr_graph_;
 
     enum class Policy {
       Comb,

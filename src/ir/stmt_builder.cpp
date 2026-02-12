@@ -4,27 +4,27 @@
 
 namespace abys::ir {
 
-  StmtBuilder::StmtBuilder(std::vector<ExprNode>& expr_nodes): expr_nodes_(expr_nodes) {
+  StmtBuilder::StmtBuilder(ExprGraph &expr_graph): expr_graph_(expr_graph) {
     contexts_.emplace_back();
   }
 
   ExprBuilder StmtBuilder::make_expr_builder() {
-    return ExprBuilder(expr_nodes_, inputs_, current_values());
+    return ExprBuilder(expr_graph_, current_values());
   }
 
-  std::unordered_map<std::string, ExprId>& StmtBuilder::current_values() {
+  std::unordered_map<std::string, ExprId> &StmtBuilder::current_values() {
     return contexts_.back().current_values;
   }
 
-  std::vector<std::string>& StmtBuilder::output_names() {
+  std::vector<std::string> &StmtBuilder::output_names() {
     return contexts_.back().output_names;
   }
 
-  std::vector<bool>& StmtBuilder::output_nonblocking() {
+  std::vector<bool> &StmtBuilder::output_nonblocking() {
     return contexts_.back().output_nonblocking;
   }
 
-  std::vector<ExprId>& StmtBuilder::output_ids() {
+  std::vector<ExprId> &StmtBuilder::output_ids() {
     return contexts_.back().output_ids;
   }
 
@@ -52,6 +52,9 @@ namespace abys::ir {
     return contexts_.size() == 1;
   }
   
+  bool StmtBuilder::is_comb() const {
+    return policy_ == Policy::Comb;
+  }
   bool StmtBuilder::is_ff() const {
     return policy_ == Policy::Ff;
   }
@@ -71,6 +74,17 @@ namespace abys::ir {
       edge_kind = EdgeKind::kPosedge;
     } else if (negedge) {
       edge_kind = EdgeKind::kNegedge;
+    }
+    if (edge_kind == EdgeKind::kNone) {
+      if (!is_undecided()) {
+        throw std::logic_error("Level-sensitive timing in non-undecided block");
+      }
+      set_comb_or_latch();
+    } else {
+      if (!is_undecided() && !is_ff()) {
+        throw std::logic_error("Edge timing in comb/latch block");
+      }
+      set_ff();
     }
     timing_events_.push_back({edge_kind, expr_id, iff_id});
   }
@@ -200,13 +214,12 @@ namespace abys::ir {
       }
     }
     ExprBuilder expr_builder = make_expr_builder();
-    for (const auto& entry : output_map) {
+    for (const auto &entry : output_map) {
       ExprId current_id = kInvalidExprId;
       auto current_it = current_values().find(entry.first);
       if (current_it != current_values().end()) {
-	current_id = current_it->second;
+        current_id = current_it->second;
       }
-      ExprId new_id = expr_builder.create_case(case_id, case_values, case_output_ids[entry.second], current_id);
       bool is_first = true;
       bool nonblocking;
       for (size_t j = 0; j < case_output_ids[entry.second].size(); j++) {
@@ -217,9 +230,12 @@ namespace abys::ir {
 	  } else {
 	    assert(nonblocking == case_output_nonblocking[entry.second][j]);
 	  }
-	}
+	} else {
+          case_output_ids[entry.second][j] = current_id;
+        }
       }
       assert(!is_first);
+      ExprId new_id = expr_builder.create_case(case_id, case_values, std::move(case_output_ids[entry.second]));
       if (!nonblocking) {
 	current_values()[entry.first] = new_id;
       }
@@ -230,4 +246,120 @@ namespace abys::ir {
     context_stack_.erase(context_stack_.begin() + stack_index, context_stack_.end());
   }
 
+  ExprId StmtBuilder::get_clock() {
+    ExprBuilder expr_builder = make_expr_builder();
+    if (timing_events_.size() != 1) {
+      // TODO: handle async reset
+      throw std::logic_error("FF requires exactly one timing event for now");
+    }
+    const auto& ev = timing_events_[0];
+    if (ev.edge == EdgeKind::kNone) {
+      throw std::logic_error("FF timing must be edge-triggered");
+    }
+    // TODO: handle iff (enable) too
+    ExprId clk_id = ev.expr_id;
+    switch (ev.edge) {
+    case EdgeKind::kPosedge:
+      return clk_id;
+    case EdgeKind::kNegedge:
+      return expr_builder.create_logical_not(clk_id);
+    case EdgeKind::kBothEdges:
+      return expr_builder.create_both_edge(clk_id);
+    case EdgeKind::kNone:
+    default:
+      throw std::logic_error("Invalid FF edge kind");
+    }
+  }
+
+  ExprId StmtBuilder::compute_missing_path(ExprId expr_id, ExprBuilder &expr_builder) const {
+    if (expr_id == kInvalidExprId) {
+      return expr_builder.get_constant_one();
+    }
+    // miss is kInvalidExprId (treated as const 0) for assigned branches/cases
+    const auto &node = expr_builder.get_node(expr_id);
+    switch (node.op) {
+    case ExprGraph::Op::kMux: {
+      const ExprId cond_id = node.operands[0];
+      auto recurse = [&](const ExprId data_id, const bool is_complemented) -> ExprId {
+        const ExprId child_id = compute_missing_path(data_id, expr_builder);
+        if (child_id == kInvalidExprId) {
+          return kInvalidExprId;
+        }
+        ExprId new_cond_id = cond_id;
+        if (is_complemented) {
+          new_cond_id = expr_builder.create_logical_not(cond_id);
+        }
+        return expr_builder.create_and({child_id, new_cond_id});
+      };
+      const ExprId miss_t_id = recurse(node.operands[1], false);
+      const ExprId miss_f_id = recurse(node.operands[2], true);
+      if (miss_t_id == kInvalidExprId) {
+        return miss_f_id;
+      }
+      if (miss_f_id == kInvalidExprId) {
+        return miss_t_id;
+      }
+      const ExprId miss_id = expr_builder.create_or({miss_t_id, miss_f_id});
+      return miss_id;
+    }
+    case ExprGraph::Op::kCase: {
+      const ExprId selector_id = node.operands[0];
+      size_t i = 1;
+      std::vector<ExprId> cond_ids, miss_ids;
+      // operands = [selector, value0, data0, value1, data1, ..., default?]
+      while (i + 1 < node.operands.size()) {
+        const ExprId case_value = node.operands[i++];
+        const ExprId data_id = node.operands[i++];
+        const ExprId child_id = compute_missing_path(data_id, expr_builder);
+        if (child_id == kInvalidExprId) {
+          cond_ids.push_back(kInvalidExprId);
+        } else {
+          const ExprId cond_id = expr_builder.create_match(selector_id, case_value);
+          cond_ids.push_back(cond_id);
+          const ExprId miss_id = expr_builder.create_and({child_id, cond_id});
+          miss_ids.push_back(miss_id);
+        }
+      }
+      // default if odd count
+      if (i < node.operands.size()) {
+        const ExprId data_id = node.operands[i];
+        const ExprId child_id = compute_missing_path(data_id, expr_builder);
+        if (child_id != kInvalidExprId) {
+          if (cond_ids.empty()) {
+            miss_ids.push_back(child_id);
+          } else {
+            for (size_t j = 0; j < cond_ids.size(); j++) {
+              if (cond_ids[j] == kInvalidExprId) {
+                const ExprId case_value = node.operands[2 * j + 1];
+                cond_ids[j] = expr_builder.create_match(selector_id, case_value);
+              }
+            }
+            ExprId cond_id = expr_builder.create_or(std::move(cond_ids));
+            cond_id = expr_builder.create_logical_not(cond_id);
+            const ExprId miss_id = expr_builder.create_and({child_id, cond_id});
+            miss_ids.push_back(miss_id);
+          }
+        }
+      }
+      if (miss_ids.empty()) {
+        return kInvalidExprId;
+      }
+      return expr_builder.create_or(std::move(miss_ids));
+    }
+    default: {
+      std::vector<ExprId>  miss_ids;
+      for (auto data_id : node.operands) {
+        ExprId miss_id = compute_missing_path(data_id, expr_builder);
+        if (miss_id != kInvalidExprId) {
+          miss_ids.push_back(miss_id);
+        }
+      }
+      if (miss_ids.empty()) {
+        return kInvalidExprId;
+      }
+      return expr_builder.create_or(std::move(miss_ids));
+    }
+    }
+  }
+  
 } // namespace abys::ir

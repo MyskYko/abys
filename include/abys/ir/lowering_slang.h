@@ -55,13 +55,13 @@ namespace abys::ir {
   }
 
   template <typename Builder>
-    class SlangExprLoweringVisitor final
+  class SlangExprLoweringVisitor final
     : public slang::ast::ASTVisitor<SlangExprLoweringVisitor<Builder>, false, true, false, true> {
   private:
-        Builder &builder_;
+    Builder &builder_;
     std::vector<ExprId> expr_stack_;
 
- public:
+  public:
     explicit SlangExprLoweringVisitor(Builder &builder) : builder_(builder) {}
 
     template<typename T>
@@ -87,13 +87,13 @@ namespace abys::ir {
 
     void handle(const slang::ast::IntegerLiteral &expr) {
       const slang::SVInt v = expr.getValue();
-      ExprId id = builder_.create_const(v.toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr));
+      ExprId id = builder_.find_or_create_const(v.toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr));
       expr_stack_.push_back(id);
     }
 
     void handle(const slang::ast::UnbasedUnsizedIntegerLiteral &expr) {
       const slang::SVInt v = expr.getValue();
-      ExprId id = builder_.create_const(v.toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr));
+      ExprId id = builder_.find_or_create_const(v.toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr));
       expr_stack_.push_back(id);
     }
     
@@ -104,62 +104,62 @@ namespace abys::ir {
       expr_stack_.pop_back();
       ExprId lhs = expr_stack_.back();
       expr_stack_.pop_back();
-      ExprNode::Op op = ExprNode::Op::kConst;
+      ExprId id;
       switch (expr.op) {
       case slang::ast::BinaryOperator::BinaryAnd:
-        op = ExprNode::Op::kAnd;
+        id = builder_.create_and({lhs, rhs});
         break;
       case slang::ast::BinaryOperator::BinaryOr:
-        op = ExprNode::Op::kOr;
+        id = builder_.create_or({lhs, rhs});
         break;
       case slang::ast::BinaryOperator::BinaryXor:
-        op = ExprNode::Op::kXor;
+        id = builder_.create_xor({lhs, rhs});
         break;
       case slang::ast::BinaryOperator::Add:
-        op = ExprNode::Op::kAdd;
+        id = builder_.create_add(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::Subtract:
-        op = ExprNode::Op::kSub;
+        id = builder_.create_sub(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::Multiply:
-        op = ExprNode::Op::kMul;
+        id = builder_.create_mul(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::LogicalShiftLeft:
       case slang::ast::BinaryOperator::ArithmeticShiftLeft:
-        op = ExprNode::Op::kShl;
+        id = builder_.create_shl(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::LogicalShiftRight:
-        op = ExprNode::Op::kShr;
+        id = builder_.create_shr(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::ArithmeticShiftRight:
-        op = ExprNode::Op::kAshr;
+        id = builder_.create_ashr(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::Equality:
       case slang::ast::BinaryOperator::CaseEquality:
-        op = ExprNode::Op::kEq;
+        id = builder_.create_eq(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::Inequality:
       case slang::ast::BinaryOperator::CaseInequality:
-        op = ExprNode::Op::kNeq;
+        id = builder_.create_neq(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::LessThan:
-        op = ExprNode::Op::kLt;
+        id = builder_.create_lt(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::LessThanEqual:
-        op = ExprNode::Op::kLe;
+        id = builder_.create_le(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::GreaterThan:
-        op = ExprNode::Op::kGt;
+        id = builder_.create_gt(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::GreaterThanEqual:
-        op = ExprNode::Op::kGe;
+        id = builder_.create_ge(lhs, rhs);
         break;
       default:
         throw std::logic_error(
-            std::string("Unhandled binary operator: ")
-            + std::string(slang::ast::OpInfo::getText(expr.op)));
+                               std::string("Unhandled binary operator: ")
+                               + std::string(slang::ast::OpInfo::getText(expr.op)));
       }
-      ExprId id = builder_.create_binary(op, lhs, rhs, expr_width(expr), expr_sign(expr));
+      assert(id != kInvalidExprId);
       expr_stack_.push_back(id);
     }
 
@@ -189,7 +189,7 @@ namespace abys::ir {
       return extract_named_value(assign.left());
     }
     
- public:
+  public:
     explicit SlangStmtLoweringVisitor(Builder &builder) : builder_(builder) {}
 
 
@@ -228,7 +228,7 @@ namespace abys::ir {
       assert(!cond_ids.empty());
       ExprId cond_id = kInvalidExprId;
       if (cond_ids.size() > 1) {
-	cond_id = expr_builder.create_nary(ExprNode::Op::kAnd, std::move(cond_ids), 1, false);
+	cond_id = expr_builder.create_and(std::move(cond_ids));
       } else {
 	cond_id = cond_ids[0];
       }
@@ -282,6 +282,16 @@ namespace abys::ir {
       builder_.merge_context();
     }
 
+    void handle(const slang::ast::ImplicitEventControl &) {
+      if (!builder_.is_undecided()) {
+        throw std::logic_error("ImplicitEventControl in non-undecided block");
+      }
+      if (builder_.has_timing()) {
+        throw std::logic_error("ImplicitEventControl with existing timing");
+      }
+      builder_.set_comb_or_latch();
+    }
+    
     void handle(const slang::ast::SignalEventControl &ev) {
       ExprBuilder expr_builder = builder_.make_expr_builder();
       ExprId expr_id = build_expr(ev.expr, expr_builder);
@@ -307,12 +317,15 @@ namespace abys::ir {
 	throw std::logic_error("Nested TimedStatement");
       }
       this->visitDefault(stmt);
+      if (builder_.is_undecided()) {
+        throw std::logic_error("TimedStatement did not set policy");
+      }
     }
 
   };
     
   template <typename Builder>
-    class SlangLoweringVisitor final
+  class SlangLoweringVisitor final
     : public slang::ast::ASTVisitor<SlangLoweringVisitor<Builder>, false, false, false, true> {
   private:
 
@@ -338,7 +351,7 @@ namespace abys::ir {
     NodeId create_expr_node(const slang::ast::Expression &expr, std::string output_name = "") {
       const ModuleId module_id = current_module_id();
       const NodeId node_id = builder_.create_operation(module_id);
-      ExprBuilder expr_builder(builder_.get_expr_nodes_ref(module_id, node_id));
+      ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
       ExprId expr_id = build_expr(expr, expr_builder);
       expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
         builder_.add_node_input_spec(module_id, node_id, name, width, sign);
@@ -369,7 +382,7 @@ namespace abys::ir {
   public:
 
     template<typename T>
-      void handle(const T&) {
+    void handle(const T&) {
       throw std::logic_error(
 			     std::string("Unhandled AST node: ") + typeid(T).name()
 			     );
@@ -385,13 +398,13 @@ namespace abys::ir {
       }
       if(symbol.direction == slang::ast::ArgumentDirection::In) {
 	NodeId node_id = builder_.create_module_input(current_module_id(), std::string(symbol.name),
-                                                     port_width(symbol), port_sign(symbol));
+                                                      port_width(symbol), port_sign(symbol));
         (void)node_id;
       } else if(symbol.direction == slang::ast::ArgumentDirection::Out) {
 	NodeId node_id = builder_.create_module_output(current_module_id(), std::string(symbol.name),
-                                                      port_width(symbol), port_sign(symbol),
-						      std::string(symbol.name), port_width(symbol),
-                                                      port_sign(symbol));
+                                                       port_width(symbol), port_sign(symbol),
+                                                       std::string(symbol.name), port_width(symbol),
+                                                       port_sign(symbol));
         (void)node_id;
       } else {
 	throw std::logic_error("Unknown port direction");
@@ -486,12 +499,12 @@ namespace abys::ir {
     void handle(const slang::ast::ProceduralBlockSymbol &symbol) {
       const ModuleId module_id = current_module_id();
       const NodeId node_id = builder_.create_operation(module_id);
-      StmtBuilder stmt_builder(builder_.get_expr_nodes_ref(module_id, node_id));
+      StmtBuilder stmt_builder(builder_.get_expr_graph(module_id, node_id));
       switch (symbol.procedureKind) {
       case slang::ast::ProceduralBlockKind::AlwaysComb: stmt_builder.set_comb(); break;
       case slang::ast::ProceduralBlockKind::AlwaysLatch: stmt_builder.set_latch(); break;
       case slang::ast::ProceduralBlockKind::AlwaysFF: stmt_builder.set_ff(); break;
-      case slang::ast::ProceduralBlockKind::Always: stmt_builder.set_comb_or_latch(); break;
+      case slang::ast::ProceduralBlockKind::Always: break; // undecided
       default: throw std::logic_error("Unknown procedural block kind");
       }
       SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder);
@@ -500,18 +513,48 @@ namespace abys::ir {
       stmt_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
         builder_.add_node_input_spec(module_id, node_id, name, width, sign);
       });
-      stmt_builder.for_each_output([&](const std::string &name, ExprId expr_id) {
-	// TODO: think about how to handle sequential stuff
-	builder_.add_node_output_expr(module_id, node_id, name, expr_id);
+      PortIndex port_idx = 0;
+      if (stmt_builder.is_ff()) {
+        builder_.add_node_output_expr(module_id, node_id, "", stmt_builder.get_clock());
+        port_idx++;
+      }
+      stmt_builder.for_each_output([&](const std::string &name, ExprId expr_id, ExprId enable_id) {
+        if (enable_id != kInvalidExprId) {
+          NodeId latch_id;
+          // TODO: we need to check if the latch is real or not after module is lowered (error when prohibited latch becomes real)
+          if (stmt_builder.is_comb()) {
+            latch_id = builder_.create_prohibited_latch(module_id);
+          } else {
+            latch_id = builder_.create_latch(module_id);
+          }
+          builder_.add_node_output_expr(module_id, node_id, "", expr_id);
+          builder_.add_node_input(module_id, latch_id, node_id, port_idx);
+          port_idx++;
+          builder_.add_node_output_expr(module_id, node_id, "", enable_id);
+          builder_.add_node_input(module_id, latch_id, node_id, port_idx);
+          port_idx++;
+          const ExprGraph::Node &expr_node = builder_.get_expr_graph(module_id, node_id).nodes[expr_id];
+          builder_.add_node_output(module_id, latch_id, name, expr_node.width, expr_node.sign);
+        } else if(stmt_builder.is_ff()) {
+          const NodeId ff_id = builder_.create_ff(module_id);
+          builder_.add_node_output_expr(module_id, node_id, "", expr_id);
+          builder_.add_node_input(module_id, ff_id, node_id, port_idx);
+          port_idx++;
+          builder_.add_node_input(module_id, ff_id, node_id, 0); // clock has port_idx = 0
+          const ExprGraph::Node &expr_node = builder_.get_expr_graph(module_id, node_id).nodes[expr_id];
+          builder_.add_node_output(module_id, ff_id, name, expr_node.width, expr_node.sign);
+        } else {
+          builder_.add_node_output_expr(module_id, node_id, name, expr_id);
+          port_idx++;
+        }
       });
     }
-    
   };
   
-  
   template <typename Builder>
-    void lower_slang_ast_to_ir(const slang::ast::RootSymbol &root, Builder &builder) {
+  void lower_slang_ast_to_ir(const slang::ast::RootSymbol &root, Builder &builder) {
     SlangLoweringVisitor<Builder> visitor(builder);
     root.visit(visitor);
   }
-}
+  
+} // namespace abys::ir
