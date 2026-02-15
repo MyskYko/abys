@@ -15,12 +15,16 @@ namespace abys::ir {
   public:
     explicit StmtBuilder(ExprGraph &expr_graph);
     
-    ExprBuilder make_expr_builder(); // TODO: maybe this can be made per context when it's open
-    std::unordered_map<std::string, ExprId> &current_values();
+    ExprBuilder &get_expr_builder();
     std::vector<std::string> &output_names();
     std::vector<bool> &output_nonblocking();
     std::vector<ExprId> &output_ids();
     size_t get_context_stack_index() const;
+    
+    const ExprBuilder &get_const_expr_builder() const;
+    const std::vector<std::string> &const_output_names() const;
+    const std::vector<bool> &const_output_nonblocking() const;
+    const std::vector<ExprId> &const_output_ids() const;
     
     // building
     void set_comb();
@@ -46,35 +50,30 @@ namespace abys::ir {
     ExprId assign_select(ExprId expr_id, ExprId index_id, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
     ExprId assign_range(ExprId expr_id, BitIndex left, BitIndex right, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
     ExprId assign_part_select(ExprId expr_id, ExprId base_id, SignalWidth slice_width, bool dir, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
-    ExprId assign_array_select();
 
     // API for exporting info for creating a tig node
     ExprId get_clock();
     
     template<typename Func>
     void for_each_input(Func &&func) const {
-      for (const auto &in : expr_graph_.inputs) {
-	const auto &node = expr_graph_.nodes[in.id];
-	func(in.name, node.width, node.sign);
-      }
+      get_const_expr_builder().for_each_input(func);
     }
 
     template<typename Func>
-    void for_each_output(Func &&func) {
+    void for_each_output(Func &&func) const {
       assert(!is_undecided()); // we don't allow always without any timing
-      ExprBuilder expr_builder = make_expr_builder();
       struct OutputInfo {
 	ExprId expr_id = 0;
         bool seen_blocking = false;
 	bool seen_nonblocking = false;
       };
       std::unordered_map<std::string, OutputInfo> info;
-      info.reserve(output_names().size());
-      for (size_t i = 0; i < output_names().size(); ++i) {
-	const auto &name = output_names()[i];
-	const bool nonblocking = output_nonblocking()[i];
+      info.reserve(const_output_names().size());
+      for (size_t i = 0; i < const_output_names().size(); ++i) {
+	const auto &name = const_output_names()[i];
+	const bool nonblocking = const_output_nonblocking()[i];
 	auto &entry = info[name];
-	entry.expr_id = output_ids()[i];
+	entry.expr_id = const_output_ids()[i];
 	entry.seen_blocking |= !nonblocking;
 	entry.seen_nonblocking |= nonblocking;
       }
@@ -100,7 +99,7 @@ namespace abys::ir {
     Policy policy_ = Policy::Undecided;
     
     struct Context {
-      std::unordered_map<std::string, ExprId> current_values;
+      ExprBuilder expr_builder;
       std::vector<std::string> output_names;
       std::vector<bool> output_nonblocking;
       std::vector<ExprId> output_ids;

@@ -11,7 +11,7 @@ namespace abys::ir {
   class ExprBuilder {
   public:
     explicit ExprBuilder(ExprGraph &graph);
-    explicit ExprBuilder(ExprGraph &graph, std::unordered_map<std::string, ExprId> &name_map);
+    explicit ExprBuilder(const ExprBuilder &parent);
 
     ExprId get_constant_zero() const;
     ExprId get_constant_one() const;
@@ -76,17 +76,19 @@ namespace abys::ir {
     ExprId create_both_edge(ExprId operand);
 
     template<typename Func>
-    void for_each_input(Func &&func) {
+    void for_each_input(Func &&func) const {
       for (auto const &input : graph_.inputs) {
-        auto const &node = graph_.nodes[input.id];
-        func(input.name, node.width, node.sign);
+        auto const &node = graph_.nodes[input.second];
+        func(input.first, node.width, node.sign);
       }
     }
 
+    ExprId get_current_value(const std::string &name) const;
+    void update_value(const std::string &name, ExprId id);
+
   private:
     ExprGraph &graph_;
-    std::unordered_map<std::string, ExprId> owned_name_map_;
-    std::unordered_map<std::string, ExprId> &name_map_;
+    std::unordered_map<std::string, ExprId> name_map_;
   
     ExprId create_node();
     

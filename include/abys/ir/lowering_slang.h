@@ -315,7 +315,7 @@ namespace abys::ir {
       }
       const auto &assign = stmt.expr.as<slang::ast::AssignmentExpression>();
       assert(!assign.isCompound()); // TODO: we need to handle this later
-      ExprBuilder expr_builder = builder_.make_expr_builder();
+      ExprBuilder &expr_builder = builder_.get_expr_builder();
       ExprId expr_id = build_expr(assign.right(), expr_builder);
       const auto &lhs = assign.left();
       std::string output_name;
@@ -362,7 +362,7 @@ namespace abys::ir {
       }
       bool nonblocking = assign.isNonBlocking();
       if (!nonblocking) {
-	builder_.current_values()[output_name] = expr_id;
+        expr_builder.update_value(output_name, expr_id);
       }
       builder_.output_names().push_back(output_name);
       builder_.output_nonblocking().push_back(nonblocking);
@@ -370,7 +370,7 @@ namespace abys::ir {
     }
     
     void handle(const slang::ast::ConditionalStatement &stmt) {
-      ExprBuilder expr_builder = builder_.make_expr_builder();
+      ExprBuilder &expr_builder = builder_.get_expr_builder();
       std::vector<ExprId> cond_ids;
       for (const auto &cond : stmt.conditions) {
 	ExprId cond_id = build_expr(*cond.expr, expr_builder);
@@ -396,7 +396,7 @@ namespace abys::ir {
 
     void handle(const slang::ast::CaseStatement &stmt) {
       size_t index = builder_.get_context_stack_index();
-      ExprBuilder expr_builder = builder_.make_expr_builder();
+      ExprBuilder &expr_builder = builder_.get_expr_builder();
       ExprId case_id = build_expr(stmt.expr, expr_builder);
       std::vector<ExprId> case_values;
       for (auto &item : stmt.items) {
@@ -444,7 +444,7 @@ namespace abys::ir {
     }
     
     void handle(const slang::ast::SignalEventControl &ev) {
-      ExprBuilder expr_builder = builder_.make_expr_builder();
+      ExprBuilder &expr_builder = builder_.get_expr_builder();
       ExprId expr_id = build_expr(ev.expr, expr_builder);
       ExprId iff_id = ev.iffCondition ? build_expr(*ev.iffCondition, expr_builder) : kInvalidExprId;
       const bool posedge = ev.edge == slang::ast::EdgeKind::PosEdge;

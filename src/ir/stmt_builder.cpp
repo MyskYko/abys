@@ -5,31 +5,36 @@
 namespace abys::ir {
 
   StmtBuilder::StmtBuilder(ExprGraph &expr_graph): expr_graph_(expr_graph) {
-    contexts_.emplace_back();
+    contexts_.emplace_back(Context({ExprBuilder(expr_graph), {}, {}, {}, {}}));
   }
 
-  ExprBuilder StmtBuilder::make_expr_builder() {
-    return ExprBuilder(expr_graph_, current_values());
+  ExprBuilder &StmtBuilder::get_expr_builder() {
+    return contexts_.back().expr_builder;
   }
-
-  std::unordered_map<std::string, ExprId> &StmtBuilder::current_values() {
-    return contexts_.back().current_values;
-  }
-
   std::vector<std::string> &StmtBuilder::output_names() {
     return contexts_.back().output_names;
   }
-
   std::vector<bool> &StmtBuilder::output_nonblocking() {
     return contexts_.back().output_nonblocking;
   }
-
   std::vector<ExprId> &StmtBuilder::output_ids() {
     return contexts_.back().output_ids;
   }
-
   size_t StmtBuilder::get_context_stack_index() const {
     return context_stack_.size();
+  }
+
+  const ExprBuilder &StmtBuilder::get_const_expr_builder() const {
+    return contexts_.back().expr_builder;
+  }
+  const std::vector<std::string> &StmtBuilder::const_output_names() const {
+    return contexts_.back().output_names;
+  }
+  const std::vector<bool> &StmtBuilder::const_output_nonblocking() const {
+    return contexts_.back().output_nonblocking;
+  }
+  const std::vector<ExprId> &StmtBuilder::const_output_ids() const {
+    return contexts_.back().output_ids;
   }
 
   void StmtBuilder::set_comb() {
@@ -90,9 +95,7 @@ namespace abys::ir {
   }
   
   void StmtBuilder::create_context() {
-    Context& ctx = contexts_.back();
-    contexts_.emplace_back();
-    contexts_.back().current_values = ctx.current_values;
+    contexts_.emplace_back(Context({ExprBuilder(get_expr_builder()), {}, {}, {}, {}}));
   }
 
   void StmtBuilder::stack_context() {
@@ -103,7 +106,7 @@ namespace abys::ir {
 
   void StmtBuilder::transfer_output(const Context &from, size_t i, ExprId expr_id) {
     if (!from.output_nonblocking[i]) {
-      current_values()[from.output_names[i]] = expr_id;
+      get_expr_builder().update_value(from.output_names[i], expr_id);
     }
     output_names().push_back(from.output_names[i]);
     output_nonblocking().push_back(from.output_nonblocking[i]);
@@ -141,7 +144,7 @@ namespace abys::ir {
       }
     }
     // append then/shared outputs if not local & update their current values
-    ExprBuilder expr_builder = make_expr_builder();
+    ExprBuilder &expr_builder = get_expr_builder();
     for (size_t i = 0; i < then_ctx.output_names.size(); i++) {
       assert (then_ctx.local_names.empty()); // assuming locals can only be declared in block, which removes local on merge
       const std::string &name = then_ctx.output_names[i];
@@ -158,11 +161,7 @@ namespace abys::ir {
       } else {
 	// not shared
 	ExprId then_id = then_ctx.output_ids[i];
-	ExprId else_id = kInvalidExprId;
-	auto current_it = current_values().find(name);
-	if (current_it != current_values().end()) {
-	  else_id = current_it->second;
-	}
+	ExprId else_id = expr_builder.get_current_value(name);
 	new_id = expr_builder.create_mux(cond_id, then_id, else_id);
       }
       assert(new_id != kInvalidExprId);
@@ -176,11 +175,7 @@ namespace abys::ir {
 	continue;
       }
       // not shared
-      ExprId then_id = kInvalidExprId;
-      auto current_it = current_values().find(name);
-      if (current_it != current_values().end()) {
-	then_id = current_it->second;
-      }
+      ExprId then_id = expr_builder.get_current_value(name);
       ExprId else_id = else_ctx.output_ids[i];
       ExprId new_id = expr_builder.create_mux(cond_id, then_id, else_id);
       transfer_output(else_ctx, i, new_id);
@@ -213,13 +208,9 @@ namespace abys::ir {
 	case_output_nonblocking[output_index][j] = ctx.output_nonblocking[i];
       }
     }
-    ExprBuilder expr_builder = make_expr_builder();
+    ExprBuilder &expr_builder = get_expr_builder();
     for (const auto &entry : output_map) {
-      ExprId current_id = kInvalidExprId;
-      auto current_it = current_values().find(entry.first);
-      if (current_it != current_values().end()) {
-        current_id = current_it->second;
-      }
+      ExprId current_id = expr_builder.get_current_value(entry.first);
       bool is_first = true;
       bool nonblocking;
       for (size_t j = 0; j < case_output_ids[entry.second].size(); j++) {
@@ -237,33 +228,27 @@ namespace abys::ir {
       assert(!is_first);
       ExprId new_id = expr_builder.create_case(selector_id, case_values, std::move(case_output_ids[entry.second]));
       if (!nonblocking) {
-	current_values()[entry.first] = new_id;
+        expr_builder.update_value(entry.first, new_id);
       }
       output_names().push_back(entry.first);
       output_nonblocking().push_back(nonblocking);
       output_ids().push_back(new_id);
     }
-    context_stack_.erase(context_stack_.begin() + stack_index, context_stack_.end());
+    while (context_stack_.size() > stack_index) {
+      context_stack_.pop_back();
+    }
   }
 
   ExprId StmtBuilder::assign_select(ExprId expr_id, ExprId index_id, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
-    ExprId current_id = kInvalidExprId;
-    auto it = current_values().find(name);
-    if (it != current_values().end()) {
-      current_id = it->second;
-    }
-    ExprBuilder expr_builder = make_expr_builder();
+    ExprBuilder &expr_builder = get_expr_builder();
+    ExprId current_id = expr_builder.get_current_value(name);
     ExprId pos_id = expr_builder.normalize_index_expr(index_id, msb, lsb);
     return expr_builder.create_masked_assign(current_id, expr_id, pos_id, expr_builder.get_constant_one(), width, sign);
   }
 
   ExprId StmtBuilder::assign_range(ExprId expr_id, BitIndex left, BitIndex right, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
-    ExprId current_id = kInvalidExprId;
-    auto it = current_values().find(name);
-    if (it != current_values().end()) {
-      current_id = it->second;
-    }
-    ExprBuilder expr_builder = make_expr_builder();
+    ExprBuilder &expr_builder = get_expr_builder();
+    ExprId current_id = expr_builder.get_current_value(name);
     BitIndex left_pos = expr_builder.normalize_index(left, msb, lsb);
     BitIndex right_pos = expr_builder.normalize_index(right, msb, lsb);
     if (left_pos < right_pos) {
@@ -276,12 +261,8 @@ namespace abys::ir {
   }
 
   ExprId StmtBuilder::assign_part_select(ExprId expr_id, ExprId base_id, SignalWidth slice_width, bool dir, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
-    ExprId current_id = kInvalidExprId;
-    auto it = current_values().find(name);
-    if (it != current_values().end()) {
-      current_id = it->second;
-    }
-    ExprBuilder expr_builder = make_expr_builder();
+    ExprBuilder &expr_builder = get_expr_builder();
+    ExprId current_id = expr_builder.get_current_value(name);
     ExprId left_id = base_id;
     if (dir) {
       expr_id = expr_builder.create_reverse(expr_id);
@@ -295,7 +276,7 @@ namespace abys::ir {
   }
   
   ExprId StmtBuilder::get_clock() {
-    ExprBuilder expr_builder = make_expr_builder();
+    ExprBuilder &expr_builder = get_expr_builder();
     if (timing_events_.size() != 1) {
       // TODO: handle async reset
       throw std::logic_error("FF requires exactly one timing event for now");

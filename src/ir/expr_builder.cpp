@@ -6,9 +6,9 @@
 
 namespace abys::ir {
 
-  ExprBuilder::ExprBuilder(ExprGraph &graph) : graph_(graph), name_map_(owned_name_map_) {}
+  ExprBuilder::ExprBuilder(ExprGraph &graph) : graph_(graph) {}
 
-  ExprBuilder::ExprBuilder(ExprGraph &graph, std::unordered_map<std::string, ExprId> &name_map) : graph_(graph), name_map_(name_map) {}
+  ExprBuilder::ExprBuilder(const ExprBuilder &parent) : graph_(parent.graph_), name_map_(parent.name_map_) {}
 
   ExprId ExprBuilder::create_node() {
     const ExprId id = static_cast<ExprId>(graph_.nodes.size());
@@ -27,13 +27,17 @@ namespace abys::ir {
   }
 
   ExprId ExprBuilder::find_or_create_input(std::string name, SignalWidth width, bool sign) {
-    const auto it = name_map_.find(name);
-    if(it != name_map_.end()) {
+    const ExprId current = get_current_value(name);
+    if (current != kInvalidExprId) {
+      return current;
+    }
+    const auto it = graph_.inputs.find(name);
+    if(it != graph_.inputs.end()) {
       return it->second;
     }
     const ExprId id = create_node();
     name_map_[name] = id;
-    graph_.inputs.emplace_back(ExprGraph::Input{id, std::move(name)});
+    graph_.inputs.emplace(std::move(name), id);
     auto &node = get_node(id);
     node.op = ExprGraph::Op::kInput;
     node.width = width;
@@ -424,6 +428,17 @@ namespace abys::ir {
     const ExprId pos = normalize_index_expr(index, msb, lsb);
     node.operands = {data, pos};
     return id;
+  }
+
+  ExprId ExprBuilder::get_current_value(const std::string &name) const {
+    auto it = name_map_.find(name);
+    if (it != name_map_.end()) {
+      return it->second;
+    }
+    return kInvalidExprId;
+  }
+  void ExprBuilder::update_value(const std::string &name, ExprId id) {
+    name_map_[name] = id;
   }
   
 } // namespace abys::ir
