@@ -7,6 +7,12 @@
 #include "abys/ir/expr_builder.h"
 namespace abys::ir {
 
+  TigBuilder::TigBuilder(Tig &design) : design_(design) {}
+
+  void TigBuilder::set_top_module(std::string name) {
+    design_.top_module_name = name;
+  }
+  
   TigBuilder::NodeId TigBuilder::create_node(ModuleId module_id, NodeKind kind) {
     Module &module = design_.modules[module_id];
     NodeId node_id = static_cast<NodeId>(module.nodes.size());
@@ -65,6 +71,30 @@ namespace abys::ir {
     }
     node.inputs.emplace_back(input_id, port_idx);
     return node_id;
+  }
+
+  void TigBuilder::create_variable(ModuleId module_id, std::string name, SignalWidth width, bool sign, bool wire, bool reg) {
+    Module &module = design_.modules[module_id];
+    Module::VariableKind kind = Module::VariableKind::kLogic;
+    assert(!wire || !reg);
+    if (wire) {
+      kind = Module::VariableKind::kWire;
+    } else if (reg) {
+      kind = Module::VariableKind::kReg;
+    }
+    module.variables.push_back({kind, std::move(name), width, sign});
+  }
+
+  void TigBuilder::create_packed_variable(ModuleId module_id, std::string name, std::vector<SignalWidth> dims, SignalWidth width, bool sign, bool wire, bool reg) {
+    Module &module = design_.modules[module_id];
+    Module::VariableKind kind = Module::VariableKind::kLogic;
+    assert(!wire || !reg);
+    if (wire) {
+      kind = Module::VariableKind::kWire;
+    } else if (reg) {
+      kind = Module::VariableKind::kReg;
+    }
+    module.packed_variables.push_back({kind, std::move(name), std::move(dims), width, sign});
   }
 
   TigBuilder::NodeId TigBuilder::create_instance(ModuleId module_id, std::string name,

@@ -2,9 +2,11 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <fstream>
 
 #include "abys/frontend.h"
 #include "abys/version.h"
+#include "abys/ir/verilog_emitter.h"
 
 namespace {
 
@@ -21,6 +23,7 @@ void print_help() {
   std::cout << "Usage:\n";
   std::cout << "  abys --version\n";
   std::cout << "  abys parse <files...> [--top <module>]\n";
+  std::cout << "  abys emit <files...> [--top <module>] [--out <file>]\n";
 }
 
 } // namespace
@@ -63,6 +66,45 @@ int main(int argc, char **argv) {
     }
 
     std::cout << "parse ok\n";
+    return 0;
+  }
+
+  if (command == "emit") {
+    std::vector<std::string> files;
+    std::optional<std::string> top;
+    std::optional<std::string> out_path;
+
+    for (int i = 2; i < argc; ++i) {
+      std::string arg = argv[i];
+      if (arg == "--top" && i + 1 < argc) {
+        top = argv[++i];
+        continue;
+      }
+      if (arg == "--out" && i + 1 < argc) {
+        out_path = argv[++i];
+        continue;
+      }
+      files.push_back(arg);
+    }
+
+    auto result = abys::build_tig_from_systemverilog(files, top);
+    if (!result.ok) {
+      std::cerr << "emit failed: " << result.message << '\n';
+      return 2;
+    }
+
+    abys::ir::VerilogEmitter emitter(result.design);
+    if (out_path) {
+      std::ofstream ofs(*out_path);
+      if (!ofs) {
+        std::cerr << "emit failed: cannot open output file: " << *out_path << '\n';
+        return 3;
+      }
+      emitter.emit(ofs);
+    } else {
+      emitter.emit(std::cout);
+    }
+
     return 0;
   }
 

@@ -57,14 +57,39 @@ namespace abys::ir {
 	std::vector<bool> combs;
 	ExprGraph expr_graph;
       };
+
+      enum class VariableKind {
+        kUnknown,
+        kWire,
+        kReg,
+        kLogic
+      };
+      
+      struct Variable {
+        VariableKind kind = VariableKind::kUnknown;
+        std::string name;
+        SignalWidth width = 0;
+        bool sign = false;
+      };
+
+      struct PackedVariable {
+        VariableKind kind = VariableKind::kUnknown;
+        std::string name;
+        std::vector<SignalWidth> dims;
+        SignalWidth width = 0;
+        bool sign = false;
+      };
       
       std::string name;
       std::vector<Port> input_ports;
       std::vector<Port> output_ports;
       std::vector<Node> nodes;
-      std::unordered_map<std::string, EdgeRef> signal_map;
+      std::vector<Variable> variables;
+      std::vector<PackedVariable> packed_variables;
+      std::unordered_map<std::string, EdgeRef> signal_map; // TOOD: move to builder?
     };
-
+    
+    std::string top_module_name;
     std::vector<Module> modules;
   };
 

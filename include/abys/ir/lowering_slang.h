@@ -511,6 +511,43 @@ namespace abys::ir {
       return node_id;
     }
 
+    void create_variable(const slang::ast::ValueSymbol &symbol, bool net) {
+      const auto &type = symbol.getType().getCanonicalType();
+      if (type.isUnpackedArray()) {
+        std::vector<SignalWidth> dims;
+        const slang::ast::Type *t = &type;
+        while (t->kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+          const auto &arr = t->as<slang::ast::FixedSizeUnpackedArrayType>();
+          const auto range = arr.range;
+          const BitIndex width = (range.left >= range.right) ? (range.left - range.right + 1) : (range.right - range.left + 1);
+          assert(width >= 0);
+          dims.push_back(width);
+          t = &arr.elementType.getCanonicalType();
+        }
+        const auto &elem = *t;
+        const SignalWidth width = elem.getBitstreamWidth();
+        const bool sign = elem.isSigned();
+        bool reg = false;
+        if (!net) {
+          if (slang::ast::IntegralType::isKind(elem.kind)) {
+            reg = elem.as<slang::ast::IntegralType>().isDeclaredReg();
+          }
+        }
+        builder_.create_packed_variable(current_module_id(), std::string(symbol.name), std::move(dims), width, sign, net, reg);
+      } else {
+        const SignalWidth width = type.getBitstreamWidth();
+        const bool sign = type.isSigned();
+        bool reg = false;
+        if (!net) {
+          if (slang::ast::IntegralType::isKind(type.kind)) {
+            reg = type.as<slang::ast::IntegralType>().isDeclaredReg();
+          }
+        }
+        builder_.create_variable(current_module_id(), std::string(symbol.name), width, sign, net, reg);
+      }
+      // TODO: implement debugging (mismatch, unused, or nondeclared)
+    }
+
   public:
     explicit SlangLoweringVisitor(Builder &builder) : builder_(builder) {}
 
@@ -647,11 +684,13 @@ namespace abys::ir {
     }
 
     void handle(const slang::ast::VariableSymbol &symbol) {
-      // TODO: handle memory
-      // TODO: implement this for debugging (mismatch, unused, or nondeclared)
-      (void)symbol;
+      create_variable(symbol, false);
     }
-
+    
+    void handle(const slang::ast::NetSymbol &symbol) {
+      create_variable(symbol, true);
+    }
+    
     void handle(const slang::ast::ProceduralBlockSymbol &symbol) {
       const ModuleId module_id = current_module_id();
       const NodeId node_id = builder_.create_operation(module_id);

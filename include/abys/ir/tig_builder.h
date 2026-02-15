@@ -39,8 +39,9 @@ namespace abys::ir {
     void add_input_spec(ModuleId module_id, NodeId node_id, SignalSpec input_spec);
 
   public:
-    explicit TigBuilder(Tig &design) : design_(design) {}
-
+    explicit TigBuilder(Tig &design);
+    void set_top_module(std::string name);
+    
     ModuleId create_module(std::string name);
 
     NodeId create_module_input(ModuleId module_id, std::string name, SignalWidth width, bool sign);
@@ -48,6 +49,9 @@ namespace abys::ir {
                                 std::string input_name, SignalWidth input_width, bool input_sign,
                                 NodeId input_id = kInvalidNodeId, PortIndex port_idx = 0);
 
+    void create_variable(ModuleId module_id, std::string name, SignalWidth width, bool sign, bool wire, bool reg);
+    void create_packed_variable(ModuleId module_id, std::string name, std::vector<SignalWidth> dims, SignalWidth width, bool sign, bool wire, bool reg);
+    
     NodeId create_instance(ModuleId module_id, std::string name, ModuleId instance_module_id);
     NodeId create_operation(ModuleId module_id);
     NodeId create_ff(ModuleId module_id);

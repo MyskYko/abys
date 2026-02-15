@@ -83,6 +83,9 @@ ir::TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &
   }
 
   ir::TigBuilder builder(design);
+  if (top && !top->empty()) {
+    builder.set_top_module(*top);
+  }
   ir::lower_slang_ast_to_ir(compilation->getRoot(), builder);
 
   return {true, "ok", std::move(design)};

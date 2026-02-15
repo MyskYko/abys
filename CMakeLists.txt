@@ -25,6 +25,7 @@ set(ABYS_CORE_SOURCES
   src/ir/expr_builder.cpp
   src/ir/stmt_builder.cpp
   src/ir/tig_builder.cpp
+  src/ir/verilog_emitter.cpp
 )
 find_package(slang CONFIG REQUIRED)
 
