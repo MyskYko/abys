@@ -1,4 +1,6 @@
 #include <cassert>
+#include <algorithm>
+#include <bitset>
 
 #include "abys/ir/expr_builder.h"
 
@@ -57,21 +59,65 @@ namespace abys::ir {
     node.sign = sign;
     return id;
   }
+
+  ExprId ExprBuilder::find_or_create_const(BitIndex index) {
+    if (index == 0) {
+      return get_constant_zero();
+    }
+    bool negative = false;
+    if (index < 0) {
+      negative = true;
+      assert(index != std::numeric_limits<BitIndex>::min());
+      index = -index;
+    }
+    std::bitset<SignalWidthBitSize> bits(index);
+    std::string str = bits.to_string();
+    size_t pos = str.find_last_not_of('0');
+    assert(pos != std::string::npos);
+    str.erase(pos + 1);
+    const ExprId id = find_or_create_const(std::to_string(str.length()) + "'b" + str, str.length(), false);
+    if (negative) {
+      return create_unary_minus(id);
+    }
+    return id;
+  }
   
-  ExprId ExprBuilder::create_logical_not(ExprId operand) {
+  ExprId ExprBuilder::create_unary_reduce(ExprGraph::Op op, ExprId operand) {
     const ExprId id = create_node();
     auto &node = get_node(id);
-    node.op = ExprGraph::Op::kLogicalNot;
+    node.op = op;
     node.width = 1;
     node.sign = false;
     node.operands.push_back(operand);
     return id;
   }
-  ExprId ExprBuilder::create_bitwise_not(ExprId operand) { return kInvalidExprId; }
-  ExprId ExprBuilder::create_and_reduce(ExprId operand) { return kInvalidExprId; }
-  ExprId ExprBuilder::create_or_reduce(ExprId operand) { return kInvalidExprId; }
-  ExprId ExprBuilder::create_xor_reduce(ExprId operand) { return kInvalidExprId; }
+  ExprId ExprBuilder::create_logical_not(ExprId operand) {
+    return create_unary_reduce(ExprGraph::Op::kLogicalNot, operand);
+  }
+  ExprId ExprBuilder::create_and_reduce(ExprId operand) {
+    return create_unary_reduce(ExprGraph::Op::kAndReduce, operand);
+  }
+  ExprId ExprBuilder::create_or_reduce(ExprId operand) {
+    return create_unary_reduce(ExprGraph::Op::kOrReduce, operand);
+  }
+  ExprId ExprBuilder::create_xor_reduce(ExprId operand) {
+    return create_unary_reduce(ExprGraph::Op::kXorReduce, operand);
+  }
 
+  ExprId ExprBuilder::create_unary(ExprGraph::Op op, ExprId operand) {
+    const ExprId id = create_node();
+    auto &node = get_node(id);
+    node.op = op;
+    const auto &operand_node = get_node(operand);
+    node.width = operand_node.width;
+    node.sign = operand_node.sign;
+    node.operands.push_back(operand);
+    return id;
+  }
+  ExprId ExprBuilder::create_bitwise_not(ExprId operand) {
+    return create_unary(ExprGraph::Op::kBitwiseNot, operand);
+  }
+  
   ExprId ExprBuilder::create_nary(ExprGraph::Op op, std::vector<ExprId> operands) {
     assert(!operands.empty());
     const ExprId id = create_node();
@@ -82,7 +128,7 @@ namespace abys::ir {
     for (ExprId operand : operands) {
       const auto &operand_node = get_node(operand);
       node.width = std::max(node.width, operand_node.width);
-      node.sign &= operand_node.sign;
+      node.sign = node.sign & operand_node.sign;
     }
     node.operands = std::move(operands);
     return id;
@@ -97,22 +143,82 @@ namespace abys::ir {
     return create_nary(ExprGraph::Op::kXor, std::move(operands));
   }
 
-  ExprId ExprBuilder::create_unary_plus(ExprId a) { return kInvalidExprId; } // nop
-  ExprId ExprBuilder::create_unary_minus(ExprId a) { return kInvalidExprId; }
-  ExprId ExprBuilder::create_add(ExprId a, ExprId b) { return kInvalidExprId; }
-  ExprId ExprBuilder::create_sub(ExprId a, ExprId b) { return kInvalidExprId; }
-  ExprId ExprBuilder::create_mul(ExprId a, ExprId b) { return kInvalidExprId; }
-  
-  ExprId ExprBuilder::create_shl(ExprId data, ExprId shamt) { return kInvalidExprId; }
-  ExprId ExprBuilder::create_shr(ExprId data, ExprId shamt) { return kInvalidExprId; }
-  ExprId ExprBuilder::create_ashr(ExprId data, ExprId shamt) { return kInvalidExprId; }
+  ExprId ExprBuilder::create_unary_plus(ExprId a) {
+    return a;
+  }
+  ExprId ExprBuilder::create_unary_minus(ExprId a) {
+    return create_unary(ExprGraph::Op::kUnaryMinus, a);
+  }
 
-  ExprId ExprBuilder::create_eq(ExprId a, ExprId b) { return kInvalidExprId; }
-  ExprId ExprBuilder::create_neq(ExprId a, ExprId b) { return kInvalidExprId; } // map to logical_not(eq)
-  ExprId ExprBuilder::create_lt(ExprId a, ExprId b) { return kInvalidExprId; }
-  ExprId ExprBuilder::create_le(ExprId a, ExprId b) { return kInvalidExprId; }
-  ExprId ExprBuilder::create_gt(ExprId a, ExprId b) { return kInvalidExprId; } // map to logical_not(le)
-  ExprId ExprBuilder::create_ge(ExprId a, ExprId b) { return kInvalidExprId; } // map to logical_not(lt)
+  ExprId ExprBuilder::create_binary(ExprGraph::Op op, ExprId a, ExprId b) {
+    const ExprId id = create_node();
+    auto &node = get_node(id);
+    node.op = op;
+    const auto &a_node = get_node(a);
+    const auto &b_node = get_node(b);
+    node.width = std::max(a_node.width, b_node.width);
+    node.sign = a_node.sign & b_node.sign;
+    node.operands = {a, b};
+    return id;
+  }
+  ExprId ExprBuilder::create_add(ExprId a, ExprId b) {
+    return create_binary(ExprGraph::Op::kAdd, a, b);
+  }
+  ExprId ExprBuilder::create_sub(ExprId a, ExprId b) {
+    return create_binary(ExprGraph::Op::kSub, a, b);
+  }
+  ExprId ExprBuilder::create_mul(ExprId a, ExprId b) {
+    return create_binary(ExprGraph::Op::kMul, a, b);
+  }
+  
+  ExprId ExprBuilder::create_shift(ExprGraph::Op op, ExprId data, ExprId shamt) {
+    const ExprId id = create_node();
+    auto &node = get_node(id);
+    node.op = op;
+    const auto &data_node = get_node(data);
+    node.width = data_node.width;
+    node.sign = data_node.sign;
+    node.operands = {data, shamt};
+    return id;
+  }
+  ExprId ExprBuilder::create_shl(ExprId data, ExprId shamt) {
+    return create_shift(ExprGraph::Op::kShl, data, shamt);
+  }
+  ExprId ExprBuilder::create_shr(ExprId data, ExprId shamt) {
+    return create_shift(ExprGraph::Op::kShr, data, shamt);
+  }
+  ExprId ExprBuilder::create_ashr(ExprId data, ExprId shamt) {
+    return create_shift(ExprGraph::Op::kAshr, data, shamt);
+  }
+
+  ExprId ExprBuilder::create_compare(ExprGraph::Op op, ExprId a, ExprId b) {
+    const ExprId id = create_node();
+    auto &node = get_node(id);
+    node.op = op;
+    node.width = 1;
+    node.sign = false;
+    node.operands = {a, b};
+    return id;
+  }
+  ExprId ExprBuilder::create_eq(ExprId a, ExprId b) {
+    return create_compare(ExprGraph::Op::kEq, a, b);
+  }
+  ExprId ExprBuilder::create_neq(ExprId a, ExprId b) {
+    const ExprId id = create_compare(ExprGraph::Op::kEq, a, b);
+    return create_logical_not(id);
+  }
+  ExprId ExprBuilder::create_lt(ExprId a, ExprId b) {
+    return create_compare(ExprGraph::Op::kLt, a, b);
+  }
+  ExprId ExprBuilder::create_le(ExprId a, ExprId b) {
+    return create_compare(ExprGraph::Op::kLe, a, b);
+  }
+  ExprId ExprBuilder::create_gt(ExprId a, ExprId b) {
+    return create_lt(b, a);
+  }
+  ExprId ExprBuilder::create_ge(ExprId a, ExprId b) {
+    return create_le(b, a);
+  }
 
   ExprId ExprBuilder::create_mux(ExprId cond, ExprId then, ExprId else_id) {
     const ExprId id = create_node();
@@ -196,17 +302,107 @@ namespace abys::ir {
     return id;
   }
 
-  ExprId ExprBuilder::create_concat(std::vector<ExprId> operands) {
-    return kInvalidExprId;
+  ExprId ExprBuilder::create_concat(std::vector<ExprId> operands, bool sign) {
+    assert(!operands.empty());
+    const ExprId id = create_node();
+    auto &node = get_node(id);
+    node.op = ExprGraph::Op::kConcat;
+    node.width = 0;
+    node.sign = sign;
+    for (ExprId operand : operands) {
+      if (operand == kInvalidExprId) {
+        node.width++;
+      } else {
+        const auto &operand_node = get_node(operand);
+        node.width += operand_node.width;
+      }
+    }
+    node.operands = std::move(operands);
+    return id;
   }
-  ExprId ExprBuilder::create_select(ExprId data, ExprId index) {
-    return kInvalidExprId;
+
+  BitIndex ExprBuilder::normalize_index(BitIndex index, BitIndex msb, BitIndex lsb) {
+    if (lsb == 0 && msb >= lsb) {
+      return index;
+    }
+    if (msb >= lsb) {
+      return index - lsb;
+    }
+    return lsb - index;
   }
-  ExprId ExprBuilder::create_range(ExprId data, SignalWidth left, SignalWidth right) {
-    return kInvalidExprId;
+  ExprId ExprBuilder::normalize_index_expr(ExprId index, BitIndex msb, BitIndex lsb) {
+    if (lsb == 0 && msb >= lsb) {
+      return index;
+    }
+    ExprId offset = find_or_create_const(lsb);
+    if (msb >= lsb) {
+      return create_sub(index, offset);
+    }
+    return create_sub(offset, index);
   }
-  ExprId ExprBuilder::create_part_select(ExprId data, ExprId base, SignalWidth width, bool dir) {
-    return kInvalidExprId;
+  ExprId ExprBuilder::create_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb) {
+    const ExprId id = create_node();
+    auto &node = get_node(id);
+    node.op = ExprGraph::Op::kRange;
+    node.width = 1;
+    node.sign = false;
+    const ExprId pos = normalize_index_expr(index, msb, lsb);
+    node.operands = {data, pos};
+    return id;
+  }
+  ExprId ExprBuilder::create_reverse(ExprId data) {
+    return create_unary(ExprGraph::Op::kReverse, data);
+  }
+  ExprId ExprBuilder::create_range(ExprId data, BitIndex left, BitIndex right, BitIndex msb, BitIndex lsb) {
+    BitIndex left_pos = normalize_index(left, msb, lsb);
+    BitIndex right_pos = normalize_index(right, msb, lsb);
+    bool is_reverse = false;
+    if (left_pos < right_pos) {
+      is_reverse = true;
+      std::swap(left_pos, right_pos);
+    }
+    const ExprId id = create_node();
+    auto &node = get_node(id);
+    node.op = ExprGraph::Op::kRange;
+    node.width = left_pos - right_pos + 1;
+    node.sign = false;
+    const ExprId pos = find_or_create_const(left_pos);
+    node.operands = {data, pos};
+    if (is_reverse) {
+      return create_reverse(id);
+    }
+    return id;
+  }
+  ExprId ExprBuilder::create_part_select(ExprId data, ExprId base, SignalWidth width, bool dir, BitIndex msb, BitIndex lsb) {
+    ExprId left = base;
+    if (dir) {
+      assert(width > 0);
+      assert(width <= static_cast<SignalWidth>(std::numeric_limits<BitIndex>::max()));
+      const ExprId offset = find_or_create_const(width - 1);
+      left = create_add(base, offset);
+    }
+    ExprId pos = normalize_index_expr(left, msb, lsb);
+    const ExprId id = create_node();
+    auto &node = get_node(id);
+    node.op = ExprGraph::Op::kRange;
+    node.width = width;
+    node.sign = false;
+    node.operands = {data, pos};
+    if (dir) {
+      return create_reverse(id);
+    }
+    return id;    
+  }
+
+  ExprId ExprBuilder::create_masked_assign(ExprId current, ExprId next, ExprId base, ExprId slice_width, SignalWidth width, bool sign) {
+    const ExprId id = create_node();
+    auto &node = get_node(id);
+    node.op = ExprGraph::Op::kMaskedAssign;
+    node.width = width;
+    node.sign = sign;
+    assert(get_node(slice_width).op == ExprGraph::Op::kConst);
+    node.operands = {current, next, base, slice_width};
+    return id;
   }
 
   ExprId ExprBuilder::create_both_edge(ExprId operand) {
@@ -216,6 +412,17 @@ namespace abys::ir {
     node.width = 1;
     node.sign = false;
     node.operands.push_back(operand);
+    return id;
+  }
+  
+  ExprId ExprBuilder::create_array_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb, SignalWidth width, bool sign) {
+    const ExprId id = create_node();
+    auto &node = get_node(id);
+    node.op = ExprGraph::Op::kArraySelect;
+    node.width = width;
+    node.sign = sign;
+    const ExprId pos = normalize_index_expr(index, msb, lsb);
+    node.operands = {data, pos};
     return id;
   }
   

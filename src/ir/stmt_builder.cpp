@@ -101,7 +101,7 @@ namespace abys::ir {
     contexts_.pop_back();    
   }
 
-  void StmtBuilder::transfer_output(const Context& from, size_t i, ExprId expr_id) {
+  void StmtBuilder::transfer_output(const Context &from, size_t i, ExprId expr_id) {
     if (!from.output_nonblocking[i]) {
       current_values()[from.output_names[i]] = expr_id;
     }
@@ -144,7 +144,7 @@ namespace abys::ir {
     ExprBuilder expr_builder = make_expr_builder();
     for (size_t i = 0; i < then_ctx.output_names.size(); i++) {
       assert (then_ctx.local_names.empty()); // assuming locals can only be declared in block, which removes local on merge
-      const std::string& name = then_ctx.output_names[i];
+      const std::string &name = then_ctx.output_names[i];
       auto it = shared_output_to_else_index.find(name);
       ExprId new_id = kInvalidExprId;
       if (it != shared_output_to_else_index.end()) {
@@ -170,8 +170,8 @@ namespace abys::ir {
     }
     // append else/non-shared outputs if not local & update their current values
     for (size_t i = 0; i < else_ctx.output_names.size(); i++) {
-      assert (else_ctx.local_names.empty());
-      const std::string& name = else_ctx.output_names[i];
+      assert(else_ctx.local_names.empty());
+      const std::string &name = else_ctx.output_names[i];
       if (shared_output_to_else_index.count(name)) {
 	continue;
       }
@@ -187,15 +187,15 @@ namespace abys::ir {
     }
   }
 
-  void StmtBuilder::merge_case(ExprId case_id, const std::vector<ExprId>& case_values, size_t stack_index) {
+  void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case_values, size_t stack_index) {
     size_t output_count = 0;
     std::unordered_map<std::string, size_t> output_map;
     std::vector<std::vector<ExprId>> case_output_ids;
     std::vector<std::vector<bool>> case_output_nonblocking;
     for (size_t j = 0; j < context_stack_.size() - stack_index; j++) {
-      const Context& ctx = context_stack_[j + stack_index];
+      const Context &ctx = context_stack_[j + stack_index];
       for (size_t i = 0; i < ctx.output_names.size(); i++) {
-	const std::string& name = ctx.output_names[i];
+	const std::string &name = ctx.output_names[i];
 	auto it = output_map.find(name);
 	size_t output_index;
 	if (it == output_map.end()) {
@@ -235,7 +235,7 @@ namespace abys::ir {
         }
       }
       assert(!is_first);
-      ExprId new_id = expr_builder.create_case(case_id, case_values, std::move(case_output_ids[entry.second]));
+      ExprId new_id = expr_builder.create_case(selector_id, case_values, std::move(case_output_ids[entry.second]));
       if (!nonblocking) {
 	current_values()[entry.first] = new_id;
       }
@@ -246,13 +246,61 @@ namespace abys::ir {
     context_stack_.erase(context_stack_.begin() + stack_index, context_stack_.end());
   }
 
+  ExprId StmtBuilder::assign_select(ExprId expr_id, ExprId index_id, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
+    ExprId current_id = kInvalidExprId;
+    auto it = current_values().find(name);
+    if (it != current_values().end()) {
+      current_id = it->second;
+    }
+    ExprBuilder expr_builder = make_expr_builder();
+    ExprId pos_id = expr_builder.normalize_index_expr(index_id, msb, lsb);
+    return expr_builder.create_masked_assign(current_id, expr_id, pos_id, expr_builder.get_constant_one(), width, sign);
+  }
+
+  ExprId StmtBuilder::assign_range(ExprId expr_id, BitIndex left, BitIndex right, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
+    ExprId current_id = kInvalidExprId;
+    auto it = current_values().find(name);
+    if (it != current_values().end()) {
+      current_id = it->second;
+    }
+    ExprBuilder expr_builder = make_expr_builder();
+    BitIndex left_pos = expr_builder.normalize_index(left, msb, lsb);
+    BitIndex right_pos = expr_builder.normalize_index(right, msb, lsb);
+    if (left_pos < right_pos) {
+      expr_id = expr_builder.create_reverse(expr_id);
+      std::swap(left_pos, right_pos);
+    }
+    ExprId left_id = expr_builder.find_or_create_const(left_pos);
+    ExprId width_id = expr_builder.find_or_create_const(left_pos - right_pos + 1);
+    return expr_builder.create_masked_assign(current_id, expr_id, left_id, width_id, width, sign);
+  }
+
+  ExprId StmtBuilder::assign_part_select(ExprId expr_id, ExprId base_id, SignalWidth slice_width, bool dir, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
+    ExprId current_id = kInvalidExprId;
+    auto it = current_values().find(name);
+    if (it != current_values().end()) {
+      current_id = it->second;
+    }
+    ExprBuilder expr_builder = make_expr_builder();
+    ExprId left_id = base_id;
+    if (dir) {
+      expr_id = expr_builder.create_reverse(expr_id);
+      assert(slice_width > 0);
+      const ExprId offset = expr_builder.find_or_create_const(slice_width - 1);
+      left_id = expr_builder.create_add(base_id, offset);
+    }
+    ExprId pos_id = expr_builder.normalize_index_expr(left_id, msb, lsb);
+    ExprId width_id = expr_builder.find_or_create_const(slice_width);
+    return expr_builder.create_masked_assign(current_id, expr_id, pos_id, width_id, width, sign);
+  }
+  
   ExprId StmtBuilder::get_clock() {
     ExprBuilder expr_builder = make_expr_builder();
     if (timing_events_.size() != 1) {
       // TODO: handle async reset
       throw std::logic_error("FF requires exactly one timing event for now");
     }
-    const auto& ev = timing_events_[0];
+    const auto &ev = timing_events_[0];
     if (ev.edge == EdgeKind::kNone) {
       throw std::logic_error("FF timing must be edge-triggered");
     }
@@ -268,97 +316,6 @@ namespace abys::ir {
     case EdgeKind::kNone:
     default:
       throw std::logic_error("Invalid FF edge kind");
-    }
-  }
-
-  ExprId StmtBuilder::compute_missing_path(ExprId expr_id, ExprBuilder &expr_builder) const {
-    if (expr_id == kInvalidExprId) {
-      return expr_builder.get_constant_one();
-    }
-    // miss is kInvalidExprId (treated as const 0) for assigned branches/cases
-    const auto &node = expr_builder.get_node(expr_id);
-    switch (node.op) {
-    case ExprGraph::Op::kMux: {
-      const ExprId cond_id = node.operands[0];
-      auto recurse = [&](const ExprId data_id, const bool is_complemented) -> ExprId {
-        const ExprId child_id = compute_missing_path(data_id, expr_builder);
-        if (child_id == kInvalidExprId) {
-          return kInvalidExprId;
-        }
-        ExprId new_cond_id = cond_id;
-        if (is_complemented) {
-          new_cond_id = expr_builder.create_logical_not(cond_id);
-        }
-        return expr_builder.create_and({child_id, new_cond_id});
-      };
-      const ExprId miss_t_id = recurse(node.operands[1], false);
-      const ExprId miss_f_id = recurse(node.operands[2], true);
-      if (miss_t_id == kInvalidExprId) {
-        return miss_f_id;
-      }
-      if (miss_f_id == kInvalidExprId) {
-        return miss_t_id;
-      }
-      const ExprId miss_id = expr_builder.create_or({miss_t_id, miss_f_id});
-      return miss_id;
-    }
-    case ExprGraph::Op::kCase: {
-      const ExprId selector_id = node.operands[0];
-      size_t i = 1;
-      std::vector<ExprId> cond_ids, miss_ids;
-      // operands = [selector, value0, data0, value1, data1, ..., default?]
-      while (i + 1 < node.operands.size()) {
-        const ExprId case_value = node.operands[i++];
-        const ExprId data_id = node.operands[i++];
-        const ExprId child_id = compute_missing_path(data_id, expr_builder);
-        if (child_id == kInvalidExprId) {
-          cond_ids.push_back(kInvalidExprId);
-        } else {
-          const ExprId cond_id = expr_builder.create_match(selector_id, case_value);
-          cond_ids.push_back(cond_id);
-          const ExprId miss_id = expr_builder.create_and({child_id, cond_id});
-          miss_ids.push_back(miss_id);
-        }
-      }
-      // default if odd count
-      if (i < node.operands.size()) {
-        const ExprId data_id = node.operands[i];
-        const ExprId child_id = compute_missing_path(data_id, expr_builder);
-        if (child_id != kInvalidExprId) {
-          if (cond_ids.empty()) {
-            miss_ids.push_back(child_id);
-          } else {
-            for (size_t j = 0; j < cond_ids.size(); j++) {
-              if (cond_ids[j] == kInvalidExprId) {
-                const ExprId case_value = node.operands[2 * j + 1];
-                cond_ids[j] = expr_builder.create_match(selector_id, case_value);
-              }
-            }
-            ExprId cond_id = expr_builder.create_or(std::move(cond_ids));
-            cond_id = expr_builder.create_logical_not(cond_id);
-            const ExprId miss_id = expr_builder.create_and({child_id, cond_id});
-            miss_ids.push_back(miss_id);
-          }
-        }
-      }
-      if (miss_ids.empty()) {
-        return kInvalidExprId;
-      }
-      return expr_builder.create_or(std::move(miss_ids));
-    }
-    default: {
-      std::vector<ExprId>  miss_ids;
-      for (auto data_id : node.operands) {
-        ExprId miss_id = compute_missing_path(data_id, expr_builder);
-        if (miss_id != kInvalidExprId) {
-          miss_ids.push_back(miss_id);
-        }
-      }
-      if (miss_ids.empty()) {
-        return kInvalidExprId;
-      }
-      return expr_builder.create_or(std::move(miss_ids));
-    }
     }
   }
   

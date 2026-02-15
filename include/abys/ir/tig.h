@@ -30,17 +30,13 @@ namespace abys::ir {
 	PortIndex port_idx = 0;
       };
 
-      // TODO: are Ri, Ro necessary?
       enum class NodeKind {
 	kInstance,
 	kPi,
 	kPo,
-	kRi,
-	kRo,
 	kOp,
 	kFf,
 	kLatch,
-        kProhibitedLatch,
 	kMemory,
 	kMacro,
 	kUnknown,
@@ -58,6 +54,7 @@ namespace abys::ir {
 	};
 	std::vector<Output> outputs;
 	std::vector<ExprId> expr_roots;
+	std::vector<bool> combs;
 	ExprGraph expr_graph;
       };
       

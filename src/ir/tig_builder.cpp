@@ -87,16 +87,6 @@ namespace abys::ir {
     return node_id;
   }
   
-  TigBuilder::NodeId TigBuilder::create_latch(ModuleId module_id) {
-    NodeId node_id = create_node(module_id, NodeKind::kLatch);
-    return node_id;
-  }
-  
-  TigBuilder::NodeId TigBuilder::create_prohibited_latch(ModuleId module_id) {
-    NodeId node_id = create_node(module_id, NodeKind::kProhibitedLatch);
-    return node_id;
-  }
-
   void TigBuilder::add_node_input(ModuleId module_id, NodeId node_id, NodeId input_id, PortIndex port_idx) {
     Module &module = design_.modules[module_id];
     Node &node = module.nodes[node_id];
@@ -137,9 +127,10 @@ namespace abys::ir {
     node.outputs.emplace_back(std::move(name), width, sign);
     add_signal(module_id, node.outputs[port_idx].name, {node_id, port_idx});
     node.expr_roots.push_back(kInvalidExprId); // placeholder
+    node.combs.push_back(false); // placeholder
   }
 
-  void TigBuilder::add_node_output_expr(ModuleId module_id, NodeId node_id, std::string name, ExprId expr_id) {
+  void TigBuilder::add_node_output_expr(ModuleId module_id, NodeId node_id, std::string name, ExprId expr_id, bool comb) {
     Module &module = design_.modules[module_id];
     Node &node = module.nodes[node_id];
     const auto &expr_node = node.expr_graph.nodes[expr_id];
@@ -149,6 +140,7 @@ namespace abys::ir {
       add_signal(module_id, node.outputs[port_idx].name, {node_id, port_idx});
     }
     node.expr_roots.push_back(expr_id);
+    node.combs.push_back(comb);
   }
 
   ExprGraph &TigBuilder::get_expr_graph(ModuleId module_id, NodeId node_id) {

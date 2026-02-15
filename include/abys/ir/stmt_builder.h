@@ -41,12 +41,15 @@ namespace abys::ir {
     void stack_context();
     void merge_context();
     void merge_conditional(ExprId cond_id);
-    void merge_case(ExprId case_id, const std::vector<ExprId> &case_values, size_t index);
+    void merge_case(ExprId selector_id, const std::vector<ExprId> &case_values, size_t stack_index);
+
+    ExprId assign_select(ExprId expr_id, ExprId index_id, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
+    ExprId assign_range(ExprId expr_id, BitIndex left, BitIndex right, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
+    ExprId assign_part_select(ExprId expr_id, ExprId base_id, SignalWidth slice_width, bool dir, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
+    ExprId assign_array_select();
 
     // API for exporting info for creating a tig node
     ExprId get_clock();
-    
-    ExprId compute_missing_path(ExprId expr_id, ExprBuilder &expr_builder) const;
     
     template<typename Func>
     void for_each_input(Func &&func) const {
@@ -59,7 +62,6 @@ namespace abys::ir {
     template<typename Func>
     void for_each_output(Func &&func) {
       assert(!is_undecided()); // we don't allow always without any timing
-      bool has_latch = false;
       ExprBuilder expr_builder = make_expr_builder();
       struct OutputInfo {
 	ExprId expr_id = 0;
@@ -80,18 +82,8 @@ namespace abys::ir {
 	if (kv.second.seen_blocking && kv.second.seen_nonblocking) {
 	  throw std::logic_error("Mixed blocking and nonblocking assignments to " + kv.first);
 	}
-        ExprId enable_id = kInvalidExprId;
-        if (!is_ff()) {
-          const ExprId miss_id = compute_missing_path(kv.second.expr_id, expr_builder);
-          if (miss_id != kInvalidExprId) {
-            has_latch = true;
-            enable_id = expr_builder.create_logical_not(miss_id);
-          }
-        }
-	func(kv.first, kv.second.expr_id, enable_id);
+	func(kv.first, kv.second.expr_id);
       }
-      // TODO: warn if always_latch && !has_latch
-      (void)has_latch;
     }
 
   private:
@@ -118,7 +110,7 @@ namespace abys::ir {
     std::vector<Context> contexts_;
     std::vector<Context> context_stack_;
 
-    void transfer_output(const Context& from, size_t i, ExprId expr_id);
+    void transfer_output(const Context &from, size_t i, ExprId expr_id);
 
     enum class EdgeKind {
       kNone,

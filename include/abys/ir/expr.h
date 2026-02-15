@@ -13,14 +13,13 @@ namespace abys::ir {
       kConst,
       kInput,
       kLogicalNot,
-      kBitwiseNot,
       kAndReduce,
       kOrReduce,
       kXorReduce,
+      kBitwiseNot,
       kAnd,
       kOr,
       kXor,
-      kUnaryPlus,
       kUnaryMinus,
       kAdd,
       kSub,
@@ -39,8 +38,10 @@ namespace abys::ir {
       kCase,
       kConvert,
       kConcat,
-      kSelect,
+      kMaskedAssign,
+      kReverse,
       kRange,
+      kArraySelect,
       kBothEdge,
     };
 
@@ -48,7 +49,6 @@ namespace abys::ir {
       Op op = Op::kUnknown;
       SignalWidth width = 0;
       bool sign = false;
-      bool ascending = false; // for range
       std::vector<ExprId> operands;
     };
   
@@ -64,7 +64,7 @@ namespace abys::ir {
 
     ExprId constant_zero = 0;
     ExprId constant_one = 1;
-    std::vector<Node> nodes = {{Op::kConst, 1, false, false, {}}, {Op::kConst, 1, false, false, {}}};
+    std::vector<Node> nodes = {{Op::kConst, 1, false, {}}, {Op::kConst, 1, false, {}}};
     std::vector<Input> inputs;
     std::vector<Constant> constants = {{constant_zero, "1'b0"}, {constant_one, "1'b1"}};
   };

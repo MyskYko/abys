@@ -51,14 +51,12 @@ namespace abys::ir {
     NodeId create_instance(ModuleId module_id, std::string name, ModuleId instance_module_id);
     NodeId create_operation(ModuleId module_id);
     NodeId create_ff(ModuleId module_id);
-    NodeId create_latch(ModuleId module_id);
-    NodeId create_prohibited_latch(ModuleId module_id);
 
     void add_node_input(ModuleId module_id, NodeId node_id, NodeId input_id, PortIndex port_idx = 0);
     void add_node_input_spec(ModuleId module_id, NodeId node_id, std::string name, SignalWidth width, bool sign);
     void finalize_node_input(ModuleId module_id, NodeId node_id);
     void add_node_output(ModuleId module_id, NodeId node_id, std::string name, SignalWidth width, bool sign);
-    void add_node_output_expr(ModuleId module_id, NodeId node_id, std::string name, ExprId expr_id);
+    void add_node_output_expr(ModuleId module_id, NodeId node_id, std::string name, ExprId expr_id, bool comb);
 
     ExprGraph &get_expr_graph(ModuleId module_id, NodeId node_id);
     void wire_connections(ModuleId module_id);
