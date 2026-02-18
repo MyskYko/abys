@@ -27,7 +27,33 @@ set(ABYS_CORE_SOURCES
   src/ir/tig_builder.cpp
   src/ir/verilog_emitter.cpp
 )
-find_package(slang CONFIG REQUIRED)
+
+function(abys_use_bundled_slang)
+  set(_slang_src "${CMAKE_SOURCE_DIR}/third_party/slang")
+  if (NOT EXISTS "${_slang_src}/CMakeLists.txt")
+    message(FATAL_ERROR
+      "Bundled slang not found at ${_slang_src}\n"
+      "Run:\n"
+      "  git submodule update --init --recursive\n"
+      "or configure with prebuilt slang via -Dslang_DIR=/path/to/slang/lib/cmake")
+  endif()
+  add_subdirectory("${_slang_src}" EXCLUDE_FROM_ALL)
+  set(ABYS_SLANG_TARGET slang::slang PARENT_SCOPE)
+endfunction()
+
+option(ABYS_USE_BUNDLED_SLANG "Use bundled slang submodule" OFF)
+
+if (ABYS_USE_BUNDLED_SLANG)
+  abys_use_bundled_slang()
+else()
+  find_package(slang CONFIG QUIET)
+  if (slang_FOUND)
+    set(ABYS_SLANG_TARGET slang::slang)
+  else()
+    message(STATUS "slang package not found; trying bundled submodule")
+    abys_use_bundled_slang()
+  endif()
+endif()
 
 add_library(abys_core ${ABYS_CORE_SOURCES})
 
