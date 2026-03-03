@@ -1,5 +1,6 @@
 #include <cassert>
 #include <unordered_set>
+#include <sstream>
 
 #include "abys/ir/verilog_emitter.h"
 
@@ -128,15 +129,15 @@ namespace abys::ir {
           os << ",\n";
         }
         first = false;
-        const auto& p = child.input_ports[i];
-        const auto& dref = node.inputs[i];
+        const auto &p = child.input_ports[i];
+        const auto &dref = node.inputs[i];
         const auto &d_node = module.nodes[dref.node_id];        
+        const std::string d_name = d_node.outputs[dref.port_idx].name;
         os << "    ." << p.name << "(";
-        if (d_node.kind == Module::NodeKind::kOp) {
+        if (d_name.empty()) { // handle convert
           assert(dref.port_idx < d_node.expr_roots.size());
-          emit_expr_rec(d_node.expr_graph, d_node.expr_roots[dref.port_idx], os);
+          emit_expr_rec(d_node.expr_graph, d_node.expr_roots[dref.port_idx], "", os);
         } else {
-          const std::string d_name = d_node.outputs[dref.port_idx].name;
           os << d_name;
         }
         os << ")";
@@ -146,7 +147,7 @@ namespace abys::ir {
           os << ",\n";
         }
         first = false;
-        const auto& p = child.output_ports[i];
+        const auto &p = child.output_ports[i];
         const std::string sig = node.outputs[i].name;
         os << "    ." << p.name << "(" << sig << ")";
       }
@@ -156,23 +157,32 @@ namespace abys::ir {
   }
 
   void VerilogEmitter::emit_combinational(const Module &module, std::ostream &os) const {
+    // TODO: latches are not separated yet
     for (const auto &node : module.nodes) {
-      if (node.kind != Module::NodeKind::kOp) {
-        continue;
-      }
-      assert(node.outputs.size() == node.expr_roots.size());
-      // TODO: continuous assign with index/range lhs is not supported yet
-      // TODO: latches are not separated yet
-      os << "  always @(*) begin\n";
-      for (size_t i = 0; i < node.outputs.size(); i++) {
-        if (node.outputs[i].name.empty()) { // handle convert
-          continue;
+      if (node.kind == Module::NodeKind::kOp) {
+        assert(node.outputs.size() == node.expr_roots.size());
+        os << "  always @(*) begin\n";
+        for (size_t i = 0; i < node.outputs.size(); i++) {
+          if (!node.outputs[i].name.empty()) { // skip convert (already handled above)
+            emit_expr("    " + node.outputs[i].name, false, node.expr_graph, node.expr_roots[i], os);
+          }
         }
-        os << "    ";
-        emit_expr(node.outputs[i].name, false, node.expr_graph, node.expr_roots[i], os);
-        os << ";\n";
+        os << "  end\n";
+      } else if (node.kind == Module::NodeKind::kMerge) {
+        assert(node.outputs.size() == 1);
+        os << "  always @(*) begin\n";
+        std::string name = node.outputs[0].name;
+        if (!name.empty()) {
+          for (const auto &input : node.inputs) {
+            const auto &input_node = module.nodes[input.node_id];
+            assert(input.node_id < module.nodes.size());
+            assert(input_node.kind == Module::NodeKind::kOp);
+            assert(input.port_idx < input_node.expr_roots.size());
+            emit_expr("    " + name, false, input_node.expr_graph, input_node.expr_roots[input.port_idx], os);
+          }
+        }
+        os << "  end\n";
       }
-      os << "  end\n";
     }
   }
 
@@ -183,44 +193,76 @@ namespace abys::ir {
       }
       assert(node.inputs.size() == 2);
       assert(node.outputs.size() == 1);
-      const auto &dref   = node.inputs[0];
+      const auto &dref = node.inputs[0];
       const auto &d_node = module.nodes[dref.node_id];
+      const std::string d_name = d_node.outputs[dref.port_idx].name;
       const auto &clkref = node.inputs[1];
       const auto &clk_node = module.nodes[clkref.node_id];
       const std::string clk_name = clk_node.outputs[clkref.port_idx].name;
       // TODO: bothedge
       os << "  always @(posedge " << clk_name << ") begin\n";
-      os << "    ";
-      if (d_node.kind == Module::NodeKind::kOp) {
-        assert(dref.port_idx < d_node.expr_roots.size());
-        emit_expr(node.outputs[0].name, true, d_node.expr_graph, d_node.expr_roots[dref.port_idx], os);
+      if (d_name.empty()) {
+        if (d_node.kind == Module::NodeKind::kOp) {
+          assert(dref.port_idx < d_node.expr_roots.size());
+          emit_expr("    " + node.outputs[0].name, true, d_node.expr_graph, d_node.expr_roots[dref.port_idx], os);
+        } else if (d_node.kind == Module::NodeKind::kMerge) {
+          for (const auto &input : d_node.inputs) {
+            const auto &input_node = module.nodes[input.node_id];
+            assert(input.node_id < module.nodes.size());
+            assert(input_node.kind == Module::NodeKind::kOp);
+            assert(input.port_idx < input_node.expr_roots.size());
+            emit_expr("    " + node.outputs[0].name, true, input_node.expr_graph, input_node.expr_roots[input.port_idx], os);
+          }
+        }
       } else {
-        const std::string d_name = d_node.outputs[dref.port_idx].name;
-        os << node.outputs[0].name << " <= " << d_name;
+        os << "    " << node.outputs[0].name << " <= " << d_name << ";\n";
       }
-      os << ";\n";
       os << "  end\n";
     }
   }
 
-  void VerilogEmitter::emit_expr(const std::string &name, bool nonblocking, const ExprGraph &expr_graph, ExprId root, std::ostream &os) const {
-    os << name;
-    if (nonblocking) {
-      os << " <= ";
-    } else {
-      os << " = ";
+  void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id, std::ostream &os) const {
+    if (id == kInvalidExprId) {
+      return;
     }
-    emit_expr_rec(expr_graph, root, os);
+    const auto &node = expr_graph.nodes[id];
+    if (node.op != ExprGraph::Op::kMaskedAssign) {
+      os << lhs;
+      if (nonblocking) {
+        os << " <= ";
+      } else {
+        os << " = ";
+      }
+      emit_expr_rec(expr_graph, id, lhs, os);
+      os << ";\n";
+      return;
+    }
+    const ExprId current = node.operands[0];
+    const ExprId next = node.operands[1];
+    const ExprId base = node.operands[2];
+    const ExprId slice_width = node.operands[3];
+    emit_expr(lhs, false, expr_graph, current, os); // turn off nonblocking to permit cascaded masked assigns
+    std::ostringstream ss;
+    ss << "[";
+    emit_expr_rec(expr_graph, base, "", ss);
+    ss << " +: ";
+    emit_expr_rec(expr_graph, slice_width, "", ss);
+    ss << "]";
+    std::string new_lhs = std::string(lhs) + ss.str();
+    emit_expr(new_lhs, false, expr_graph, next, os); // turn off nonblocking to permit cascaded masked assigns
   }
 
- void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::ostream &os) const {
-    assert(id != kInvalidExprId);
+  void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::string_view lhs, std::ostream &os) const {
+    if (id == kInvalidExprId) {
+      os << lhs;
+      return;
+    }
     const auto &node = expr_graph.nodes[id];
     auto emit_bin = [&](const char *op) { // TODO: sign is probably not handled properly
       os << "(";
-      emit_expr_rec(expr_graph, node.operands[0], os);
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
       os << " " << op << " ";
-      emit_expr_rec(expr_graph, node.operands[1], os);
+      emit_expr_rec(expr_graph, node.operands[1], lhs, os);
       os << ")";
     };
     switch (node.op) {
@@ -243,28 +285,34 @@ namespace abys::ir {
       assert(false);
     }
     case ExprGraph::Op::kLogicalNot:
-      os << "(!"; emit_expr_rec(expr_graph, node.operands[0], os); os << ")";
+      os << "(!";
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+      os << ")";
       return;
     case ExprGraph::Op::kBitwiseNot:
-      os << "(~"; emit_expr_rec(expr_graph, node.operands[0], os); os << ")";
+      os << "(~";
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+      os << ")";
       return;
     case ExprGraph::Op::kAndReduce:
       os << "(&";
-      emit_expr_rec(expr_graph, node.operands[0], os);
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
       os << ")";
       return;
     case ExprGraph::Op::kOrReduce:
       os << "(|";
-      emit_expr_rec(expr_graph, node.operands[0], os);
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
       os << ")";
       return;
     case ExprGraph::Op::kXorReduce:
       os << "(^";
-      emit_expr_rec(expr_graph, node.operands[0], os);
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
       os << ")";
       return;
     case ExprGraph::Op::kUnaryMinus:
-      os << "(-"; emit_expr_rec(expr_graph, node.operands[0], os); os << ")";
+      os << "(-";
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+      os << ")";
       return;
     case ExprGraph::Op::kAdd:
       emit_bin("+");
@@ -275,6 +323,9 @@ namespace abys::ir {
     case ExprGraph::Op::kMul:
       emit_bin("*");
       return;
+    case ExprGraph::Op::kDiv:
+      emit_bin("/");
+      return;
     case ExprGraph::Op::kShl:
       emit_bin("<<");
       return;
@@ -283,9 +334,9 @@ namespace abys::ir {
       return;
     case ExprGraph::Op::kAshr:
       os << "($signed(";
-      emit_expr_rec(expr_graph, node.operands[0], os);
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
       os << ") >>> ";
-      emit_expr_rec(expr_graph, node.operands[1], os);
+      emit_expr_rec(expr_graph, node.operands[1], lhs, os);
       os << ")";
       return;
     case ExprGraph::Op::kEq:
@@ -306,23 +357,76 @@ namespace abys::ir {
         if (i) {
           os << " " << op << " ";
         }
-        emit_expr_rec(expr_graph, node.operands[i], os);
+        emit_expr_rec(expr_graph, node.operands[i], lhs, os);
       }
       os << ")";
       return;
     }
     case ExprGraph::Op::kMux:
       os << "(";
-      emit_expr_rec(expr_graph, node.operands[0], os);
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
       os << " ? ";
-      emit_expr_rec(expr_graph, node.operands[1], os);
+      emit_expr_rec(expr_graph, node.operands[1], lhs, os);
       os << " : ";
-      emit_expr_rec(expr_graph, node.operands[2], os);
+      emit_expr_rec(expr_graph, node.operands[2], lhs, os);
       os << ")";
       return;
+    case ExprGraph::Op::kCase: {
+      // operands = [selector, value0, data0, value1, data1, ..., default?]
+      const ExprId sel = node.operands[0];
+      auto emit_match = [&](ExprId value_id) {
+        const auto &v = expr_graph.nodes[value_id];
+        if (v.op == ExprGraph::Op::kList) {
+          os << "(";
+          for (size_t k = 0; k < v.operands.size(); k++) {
+            if (k) {
+              os << " || ";
+            }
+            os << "(";
+            emit_expr_rec(expr_graph, sel, lhs, os);
+            os << " == ";
+            emit_expr_rec(expr_graph, v.operands[k], lhs, os);
+            os << ")";
+          }
+          os << ")";
+        } else {
+          os << "(";
+          emit_expr_rec(expr_graph, sel, lhs, os);
+          os << " == ";
+          emit_expr_rec(expr_graph, value_id, lhs, os);
+          os << ")";
+        }
+      };
+      size_t i = 1;
+      bool first = true;
+      while (i + 1 < node.operands.size()) {
+        const ExprId value_id = node.operands[i++];
+        const ExprId data_id  = node.operands[i++];
+        if (!first) {
+          os << " : ";
+        }
+        first = false;
+        emit_match(value_id);
+        os << " ? ";
+        emit_expr_rec(expr_graph, data_id, lhs, os);
+      }
+      if (i < node.operands.size()) {
+        if (!first) {
+          os << " : ";
+        }
+        emit_expr_rec(expr_graph, node.operands[i], lhs, os);
+      } else {
+        if (!first) {
+          os << " : ";
+        }
+        // no default -> unknown
+        os << lhs;
+      }
+      return;
+    }
     case ExprGraph::Op::kConvert: {
       os << (node.sign ? "$signed(" : "$unsigned(");
-      emit_expr_rec(expr_graph, node.operands[0], os);
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
       os << ")";
       return;
     }
@@ -332,7 +436,7 @@ namespace abys::ir {
         if (i) {
           os << ", ";
         }
-        emit_expr_rec(expr_graph, node.operands[i], os);
+        emit_expr_rec(expr_graph, node.operands[i], lhs, os);
       }
       os << "}";
       return;
@@ -340,7 +444,7 @@ namespace abys::ir {
       const ExprId op_id = node.operands[0];
       const auto &op_node = expr_graph.nodes[op_id];
       if (op_node.width <= 1) {
-        emit_expr_rec(expr_graph, op_id, os);
+        emit_expr_rec(expr_graph, op_id, lhs, os);
         return;
       }
       os << "{";
@@ -348,50 +452,60 @@ namespace abys::ir {
         if (i != 0) {
           os << ", ";
         }
-        emit_expr_rec(expr_graph, op_id, os);
+        emit_expr_rec(expr_graph, op_id, lhs, os);
         os << "[" << i << "]";
       }
       os << "}";
       return;
     }
     case ExprGraph::Op::kRange:
-      emit_expr_rec(expr_graph, node.operands[0], os);
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
       os << "[";
-      emit_expr_rec(expr_graph, node.operands[1], os);
+      emit_expr_rec(expr_graph, node.operands[1], lhs, os);
       if (node.width > 1) {
         os << " -: " << node.width;
       }
       os << "]";
       return;
     case ExprGraph::Op::kArraySelect:
-      emit_expr_rec(expr_graph, node.operands[0], os);
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
       os << "[";
-      emit_expr_rec(expr_graph, node.operands[1], os);
+      emit_expr_rec(expr_graph, node.operands[1], lhs, os);
       os << "]";
       return;
-    case ExprGraph::Op::kMaskedAssign: {
+    case ExprGraph::Op::kGather: {
+      os << "'{";
+      for (size_t i = 0; i < node.operands.size(); i++) {
+        if (i) {
+          os << ", ";
+        }
+        emit_expr_rec(expr_graph, node.operands[i], lhs, os);
+      }
+      os << "}";
+      return;
+    }
+    case ExprGraph::Op::kMaskedAssign: { // this is only packed array
       const ExprId current = node.operands[0];
       const ExprId next = node.operands[1];
       const ExprId base = node.operands[2];
-      const ExprId slice = node.operands[3];
-      const SignalWidth W = node.width;
+      const ExprId slice_width = node.operands[3];
+      const SignalWidth width = node.width;
       os << "((";
-      emit_expr_rec(expr_graph, current, os);
-      os << " & ~(({" << W << "{1'b1}} >> (" << W << " - ";
-      emit_expr_rec(expr_graph, slice, os);
+      emit_expr_rec(expr_graph, current, lhs, os);
+      os << " & ~(({" << width << "{1'b1}} >> (" << width << " - ";
+      emit_expr_rec(expr_graph, slice_width, lhs, os);
       os << ")) << ";
-      emit_expr_rec(expr_graph, base, os);
+      emit_expr_rec(expr_graph, base, lhs, os);
       os << ")) | ((";
-      emit_expr_rec(expr_graph, next, os);
-      os << " & ({" << W << "{1'b1}} >> (" << W << " - ";
-      emit_expr_rec(expr_graph, slice, os);
+      emit_expr_rec(expr_graph, next, lhs, os);
+      os << " & ({" << width << "{1'b1}} >> (" << width << " - ";
+      emit_expr_rec(expr_graph, slice_width, lhs, os);
       os << "))) << ";
-      emit_expr_rec(expr_graph, base, os);
+      emit_expr_rec(expr_graph, base, lhs, os);
       os << "))";
       return;
     }
     default:
-      //kCase (and kList handling inside it)
       //kBothEdge
       assert(false);
     }

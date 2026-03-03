@@ -25,6 +25,7 @@ namespace abys::ir {
       kAdd,
       kSub,
       kMul,
+      kDiv, // TODO: do we really want this? can we just evaluate them to constant?
       kShl,
       kShr,
       kAshr,
@@ -36,11 +37,13 @@ namespace abys::ir {
       kCase,
       kConvert,
       kConcat,
+      kGather,
       kMaskedAssign,
       kReverse,
       kRange,
       kArraySelect,
       kBothEdge,
+      kCall,
     };
 
     struct Node {
@@ -55,11 +58,18 @@ namespace abys::ir {
       std::string value; // TODO: think about better structure
     };
 
+    struct Call {
+      ExprId id;
+      const void *subr_ptr;
+      std::string name; // to debug
+    };
+
     ExprId constant_zero = 0;
     ExprId constant_one = 1;
     std::vector<Node> nodes = {{Op::kConst, 1, false, {}}, {Op::kConst, 1, false, {}}};
     std::unordered_map<std::string, ExprId> inputs;
     std::vector<Constant> constants = {{constant_zero, "1'b0"}, {constant_one, "1'b1"}};
+    std::vector<Call> calls;
   };
 
 } // namespace abys::ir

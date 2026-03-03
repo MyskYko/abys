@@ -35,6 +35,7 @@ namespace abys::ir {
 	kPi,
 	kPo,
 	kOp,
+        kMerge,
 	kFf,
 	kLatch,
 	kMemory,
@@ -87,10 +88,27 @@ namespace abys::ir {
       std::vector<Variable> variables;
       std::vector<PackedVariable> packed_variables;
       std::unordered_map<std::string, EdgeRef> signal_map; // TOOD: move to builder?
+      std::vector<std::tuple<std::string, Node::Output, NodeId, PortIndex>> pending_ffs; // name of ff, clk spec, data node, data port index
+      // TOOD: move to builder?
     };
-    
+
+    struct Subroutine {
+      struct Port {
+	std::string name;
+	SignalWidth width = 0;
+	bool sign = false;
+      };
+      const void *subr_ptr = nullptr;
+      std::string name; // for debug
+      std::vector<Port> inputs;
+      ExprGraph expr_graph;
+      ExprId expr_root = kInvalidExprId;
+    };
+
     std::string top_module_name;
     std::vector<Module> modules;
+    std::vector<Subroutine> subroutines;
+    uint32_t temporary_name_count = 0;
   };
 
 } // namespace abys::ir

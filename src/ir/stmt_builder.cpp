@@ -20,6 +20,9 @@ namespace abys::ir {
   std::vector<ExprId> &StmtBuilder::output_ids() {
     return contexts_.back().output_ids;
   }
+  void StmtBuilder::add_local_variable(std::string name) {
+    contexts_.back().local_names.insert(std::move(name));
+  }
   size_t StmtBuilder::get_context_stack_index() const {
     return context_stack_.size();
   }
@@ -238,42 +241,6 @@ namespace abys::ir {
       context_stack_.pop_back();
     }
   }
-
-  ExprId StmtBuilder::assign_select(ExprId expr_id, ExprId index_id, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
-    ExprBuilder &expr_builder = get_expr_builder();
-    ExprId current_id = expr_builder.get_current_value(name);
-    ExprId pos_id = expr_builder.normalize_index_expr(index_id, msb, lsb);
-    return expr_builder.create_masked_assign(current_id, expr_id, pos_id, expr_builder.get_constant_one(), width, sign);
-  }
-
-  ExprId StmtBuilder::assign_range(ExprId expr_id, BitIndex left, BitIndex right, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
-    ExprBuilder &expr_builder = get_expr_builder();
-    ExprId current_id = expr_builder.get_current_value(name);
-    BitIndex left_pos = expr_builder.normalize_index(left, msb, lsb);
-    BitIndex right_pos = expr_builder.normalize_index(right, msb, lsb);
-    if (left_pos < right_pos) {
-      expr_id = expr_builder.create_reverse(expr_id);
-      std::swap(left_pos, right_pos);
-    }
-    ExprId left_id = expr_builder.find_or_create_const(left_pos);
-    ExprId width_id = expr_builder.find_or_create_const(left_pos - right_pos + 1);
-    return expr_builder.create_masked_assign(current_id, expr_id, left_id, width_id, width, sign);
-  }
-
-  ExprId StmtBuilder::assign_part_select(ExprId expr_id, ExprId base_id, SignalWidth slice_width, bool dir, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
-    ExprBuilder &expr_builder = get_expr_builder();
-    ExprId current_id = expr_builder.get_current_value(name);
-    ExprId left_id = base_id;
-    if (dir) {
-      expr_id = expr_builder.create_reverse(expr_id);
-      assert(slice_width > 0);
-      const ExprId offset = expr_builder.find_or_create_const(slice_width - 1);
-      left_id = expr_builder.create_add(base_id, offset);
-    }
-    ExprId pos_id = expr_builder.normalize_index_expr(left_id, msb, lsb);
-    ExprId width_id = expr_builder.find_or_create_const(slice_width);
-    return expr_builder.create_masked_assign(current_id, expr_id, pos_id, width_id, width, sign);
-  }
   
   ExprId StmtBuilder::get_clock() {
     ExprBuilder &expr_builder = get_expr_builder();
@@ -299,5 +266,48 @@ namespace abys::ir {
       throw std::logic_error("Invalid FF edge kind");
     }
   }
-  
+
+  void StmtBuilder::get_clock_spec(std::string &name, SignalWidth &width, bool &sign) const {
+    if (timing_events_.size() != 1) {
+      throw std::logic_error("FF requires exactly one timing event for now");
+    }
+    const auto &ev = timing_events_[0];
+    if (ev.edge == EdgeKind::kNone) {
+      throw std::logic_error("FF timing must be edge-triggered");
+    }
+    if (ev.edge == EdgeKind::kNegedge || ev.edge == EdgeKind::kBothEdges) {
+      // TODO: support negedge / bothedge clock spec
+      throw std::logic_error("Only posedge clock is supported in get_clock_spec");
+    }
+    ExprId src_id = ev.expr_id;
+    if (src_id == kInvalidExprId) {
+      throw std::logic_error("Invalid clock expression");
+    }
+    const auto &src_node0 = expr_graph_.nodes[src_id];
+    if (src_node0.op == ExprGraph::Op::kConvert) {
+      if (src_node0.operands.empty()) {
+        throw std::logic_error("Malformed clock convert node");
+      }
+      src_id = src_node0.operands[0];
+    }
+    const auto &src_node = expr_graph_.nodes[src_id];
+    if (src_node.op != ExprGraph::Op::kInput) {
+      throw std::logic_error("Clock must be a direct input signal for now");
+    }
+    bool found = false;
+    for (const auto &kv : expr_graph_.inputs) {
+      if (kv.second == src_id) {
+        name = kv.first;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      throw std::logic_error("Clock input name not found");
+    }
+    width = src_node.width;
+    sign = src_node.sign;
+    // TODO: handle iff (enable) too
+  }
+
 } // namespace abys::ir

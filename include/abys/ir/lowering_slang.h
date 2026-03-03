@@ -67,28 +67,28 @@ namespace abys::ir {
     return *v;
   }
 
+  void get_width_sign(const slang::ast::Type &type, SignalWidth &width, bool &sign) {
+    if (type.isUnpackedArray()) {
+      const auto &ct = type.getCanonicalType();
+      if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+        throw std::logic_error("Unsupported dynamic size unpacked array");
+      }
+      const auto &arr = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
+      const auto range = arr.range;
+      width = (range.left >= range.right) ? (range.left - range.right + 1) : (range.right - range.left + 1);
+      sign = false;
+    } else {
+      width = type.getBitstreamWidth();
+      sign = type.isSigned();
+    }
+  }
+  
   template <typename Builder>
   class SlangExprLoweringVisitor final
     : public slang::ast::ASTVisitor<SlangExprLoweringVisitor<Builder>, false, true, false, true> {
   private:
     Builder &builder_;
     std::vector<ExprId> expr_stack_;
-
-    void get_width_sign(const slang::ast::Type &type, SignalWidth &width, bool &sign) {
-      if (type.isUnpackedArray()) {
-        const auto &ct = type.getCanonicalType();
-        if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
-          throw std::logic_error("Unsupported dynamic size unpacked array");
-        }
-        const auto &arr = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
-        const auto range = arr.range;
-        width = (range.left >= range.right) ? (range.left - range.right + 1) : (range.right - range.left + 1);
-        sign = false;
-      } else {
-        width = type.getBitstreamWidth();
-        sign = type.isSigned();
-      }
-    }
     
   public:
     explicit SlangExprLoweringVisitor(Builder &builder) : builder_(builder) {}
@@ -99,8 +99,6 @@ namespace abys::ir {
                              std::string("Unhandled AST node: ") + typeid(T).name()
                              );
     }
-
-    // TODO: local variable
     
     void handle(const slang::ast::ConversionExpression &expr) {
       this->visitDefault(expr);
@@ -128,6 +126,34 @@ namespace abys::ir {
     void handle(const slang::ast::UnbasedUnsizedIntegerLiteral &expr) {
       const slang::SVInt v = expr.getValue();
       ExprId id = builder_.find_or_create_const(v.toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr));
+      expr_stack_.push_back(id);
+    }
+
+    void handle(const slang::ast::CallExpression &expr) {
+      const auto cv = expr.getConstant();
+      if (cv && *cv && cv->isInteger()) {
+        const slang::SVInt v = cv->integer();
+        const ExprId id = builder_.find_or_create_const(v.toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr));
+        expr_stack_.push_back(id);
+        return;
+      }
+      if (expr.thisClass() != nullptr) {
+        throw std::logic_error("Unsupported class member call: " + std::string(expr.getSubroutineName()));
+      }
+      if (expr.isSystemCall()) {
+        throw std::logic_error("Unsupported system call: " + std::string(expr.getSubroutineName()));
+      }
+      const size_t index = expr_stack_.size();
+      this->visitDefault(expr);
+      const size_t n = expr_stack_.size() - index;
+      std::vector<ExprId> operands(n);
+      for (size_t i = 0; i < n; i++) {
+        operands[n - 1 - i] = expr_stack_.back();
+        expr_stack_.pop_back();
+      }
+      std::string name(expr.getSubroutineName());
+      const auto *subr_ptr = std::get<const slang::ast::SubroutineSymbol*>(expr.subroutine);
+      const ExprId id = builder_.create_call(subr_ptr, std::move(name), std::move(operands), expr_width(expr), expr_sign(expr));
       expr_stack_.push_back(id);
     }
     
@@ -195,6 +221,50 @@ namespace abys::ir {
       }
     }
 
+    void handle(const slang::ast::ConcatenationExpression &expr) {
+      const size_t index = expr_stack_.size();
+      this->visitDefault(expr);
+      const size_t n = expr_stack_.size() - index;
+      std::vector<ExprId> operands(n);
+      for (size_t i = 0; i < n; i++) {
+        operands[n - 1 - i] = expr_stack_.back();
+        expr_stack_.pop_back();
+      }
+      expr_stack_.push_back(builder_.create_concat(std::move(operands), expr_sign(expr)));
+    }
+
+    void handle(const slang::ast::ReplicationExpression &expr) {
+      const BitIndex rep = extract_constant_index(expr.count());
+      if (rep < 0) {
+        throw std::logic_error("Negative replication count");
+      }
+      expr.concat().visit(*this);
+      ExprId body = expr_stack_.back();
+      expr_stack_.pop_back();
+      std::vector<ExprId> operands;
+      operands.reserve(rep);
+      for (size_t i = 0; i < static_cast<size_t>(rep); i++) {
+        operands.push_back(body);
+      }
+      expr_stack_.push_back(builder_.create_concat(std::move(operands), expr_sign(expr)));
+    }
+    
+    void handle(const slang::ast::ConditionalExpression &expr) {
+      if (expr.conditions.size() != 1 || expr.conditions[0].pattern != nullptr) {
+        throw std::logic_error("Unsupported conditional expression with pattern chain");
+      }
+      const size_t index = expr_stack_.size();
+      this->visitDefault(expr);
+      assert(expr_stack_.size() == index + 3);
+      const ExprId else_id = expr_stack_.back();
+      expr_stack_.pop_back();
+      const ExprId then_id = expr_stack_.back();
+      expr_stack_.pop_back();
+      const ExprId cond = expr_stack_.back();
+      expr_stack_.pop_back();
+      expr_stack_.push_back(builder_.create_mux(cond, then_id, else_id));
+    } 
+    
     void handle(const slang::ast::BinaryExpression &expr) {
       this->visitDefault(expr);
       assert(expr_stack_.size() >= 2);
@@ -221,6 +291,9 @@ namespace abys::ir {
         break;
       case slang::ast::BinaryOperator::Multiply:
         id = builder_.create_mul(lhs, rhs);
+        break;
+      case slang::ast::BinaryOperator::Divide:
+        id = builder_.create_div(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::LogicalShiftLeft:
       case slang::ast::BinaryOperator::ArithmeticShiftLeft:
@@ -261,6 +334,59 @@ namespace abys::ir {
       expr_stack_.push_back(id);
     }
 
+    void handle(const slang::ast::UnaryExpression &expr) {
+      this->visitDefault(expr);
+      assert(!expr_stack_.empty());
+      ExprId a = expr_stack_.back();
+      expr_stack_.pop_back();
+      ExprId id = kInvalidExprId;
+      switch (expr.op) {
+      case slang::ast::UnaryOperator::Plus:
+        id = builder_.create_unary_plus(a);
+        break;
+      case slang::ast::UnaryOperator::Minus:
+        id = builder_.create_unary_minus(a);
+        break;
+      case slang::ast::UnaryOperator::LogicalNot:
+        id = builder_.create_logical_not(a);
+        break;
+      case slang::ast::UnaryOperator::BitwiseNot:
+        id = builder_.create_bitwise_not(a);
+        break;
+      case slang::ast::UnaryOperator::BitwiseAnd:
+        id = builder_.create_and_reduce(a);
+        break;
+      case slang::ast::UnaryOperator::BitwiseOr:
+        id = builder_.create_or_reduce(a);
+        break;
+      case slang::ast::UnaryOperator::BitwiseXor:
+        id = builder_.create_xor_reduce(a); // TODO: xnor reduce if needed
+        break;
+      case slang::ast::UnaryOperator::BitwiseNand:
+      case slang::ast::UnaryOperator::BitwiseNor:
+      case slang::ast::UnaryOperator::BitwiseXnor:
+      case slang::ast::UnaryOperator::Preincrement:
+      case slang::ast::UnaryOperator::Predecrement:
+      case slang::ast::UnaryOperator::Postincrement:
+      case slang::ast::UnaryOperator::Postdecrement:
+        throw std::logic_error("Notop/inc/dec unary operators are not supported");
+      }
+      assert(id != kInvalidExprId);
+      expr_stack_.push_back(id);
+    }
+
+    void handle(const slang::ast::SimpleAssignmentPatternExpression &expr) {
+      const size_t index = expr_stack_.size();
+      this->visitDefault(expr);
+      const size_t n = expr_stack_.size() - index;
+      std::vector<ExprId> operands(n);
+      for (size_t i = 0; i < n; i++) {
+        operands[n - 1 - i] = expr_stack_.back(); // restore original element order
+        expr_stack_.pop_back();
+      }
+      expr_stack_.push_back(builder_.create_gather(std::move(operands)));
+    }
+
     // TODO: handle compound assignment here
 
     ExprId get_root() {
@@ -276,52 +402,52 @@ namespace abys::ir {
     return expr_visitor.get_root();
   }
 
-  template <typename Builder>
-  class SlangStmtLoweringVisitor final
-    : public slang::ast::ASTVisitor<SlangStmtLoweringVisitor<Builder>, true, false, false, true> {
-  private:
-    Builder &builder_;
-
-    void get_width_sign_range(const slang::ast::Type &type, SignalWidth &width, bool &sign, slang::ConstantRange &range) {
-      if (type.isUnpackedArray()) {
-        const auto &ct = type.getCanonicalType();
-        if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
-          throw std::logic_error("Unsupported dynamic size unpacked array");
-        }
-        const auto &arr = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
-        range = arr.range;
-        width = (range.left >= range.right) ? (range.left - range.right + 1) : (range.right - range.left + 1);
-        sign = false;
-      } else {
-        range = type.getFixedRange();
-        width = type.getBitstreamWidth();
-        sign = type.isSigned();
+  void get_width_sign_range(const slang::ast::Type &type, SignalWidth &width, bool &sign, slang::ConstantRange &range) {
+    if (type.isUnpackedArray()) {
+      const auto &ct = type.getCanonicalType();
+      if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+        throw std::logic_error("Unsupported dynamic size unpacked array");
       }
+      const auto &arr = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
+      range = arr.range;
+      width = (range.left >= range.right) ? (range.left - range.right + 1) : (range.right - range.left + 1);
+      sign = false;
+    } else {
+      range = type.getFixedRange();
+      width = type.getBitstreamWidth();
+      sign = type.isSigned();
     }
+  }
     
-  public:
-    explicit SlangStmtLoweringVisitor(Builder &builder) : builder_(builder) {}
-
-    template<typename T>
-    void handle(const T&) {
-      throw std::logic_error(
-                             std::string("Unhandled AST node: ") + typeid(T).name()
-                             );
-    }
-
-    void handle(const slang::ast::ExpressionStatement &stmt) {
-      if (stmt.expr.kind != slang::ast::ExpressionKind::Assignment) {
-	throw std::logic_error("Non-assignment expression statement is unsupported");
+  template <typename EmitFn>
+  void lower_lhs_assignment(const slang::ast::Expression &whole_lhs, ExprId rhs_id, SignalWidth rhs_width, ExprBuilder &expr_builder, EmitFn &&record) {
+    assert(rhs_width > 0);
+    BitIndex remaining = rhs_width;
+    auto get_rhs_id = [&](const slang::ast::Expression &lhs) -> ExprId {
+      ExprId expr_id = rhs_id;
+      SignalWidth width;
+      bool sign;
+      get_width_sign(*lhs.type, width, sign);
+      assert(remaining >= static_cast<BitIndex>(width));
+      if (width != rhs_width) {
+        const BitIndex left = remaining - 1;
+        const BitIndex right = remaining - width;
+        expr_id = expr_builder.create_range(rhs_id, left, right, static_cast<BitIndex>(rhs_width - 1), 0);
       }
-      const auto &assign = stmt.expr.as<slang::ast::AssignmentExpression>();
-      assert(!assign.isCompound()); // TODO: we need to handle this later
-      ExprBuilder &expr_builder = builder_.get_expr_builder();
-      ExprId expr_id = build_expr(assign.right(), expr_builder);
-      const auto &lhs = assign.left();
+      remaining -= width;
+      return expr_id;
+    };
+    std::vector<const slang::ast::Expression*> lhs_stack{&whole_lhs};
+    while (!lhs_stack.empty()) {
+      const slang::ast::Expression &lhs = *lhs_stack.back();
+      lhs_stack.pop_back();
       std::string output_name;
+      ExprId expr_id = kInvalidExprId;
       if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
+        expr_id = get_rhs_id(lhs);
         output_name = extract_named_value(lhs);
       } else if (lhs.kind == slang::ast::ExpressionKind::ElementSelect) {
+        expr_id = get_rhs_id(lhs);
         const auto &sel = lhs.as<slang::ast::ElementSelectExpression>();
         output_name = extract_named_value(sel.value());
         const ExprId index_id = build_expr(sel.selector(), expr_builder);
@@ -330,8 +456,9 @@ namespace abys::ir {
         bool sign;
         slang::ConstantRange range;
         get_width_sign_range(type, width, sign, range);
-        expr_id = builder_.assign_select(expr_id, index_id, output_name, width, sign, range.left, range.right);
+        expr_id = expr_builder.assign_select(expr_id, index_id, output_name, width, sign, range.left, range.right);
       } else if (lhs.kind == slang::ast::ExpressionKind::RangeSelect) {
+        expr_id = get_rhs_id(lhs);
         const auto &sel = lhs.as<slang::ast::RangeSelectExpression>();
         output_name = extract_named_value(sel.value());
         const auto kind = sel.getSelectionKind();
@@ -345,41 +472,94 @@ namespace abys::ir {
         if (kind == slang::ast::RangeSelectionKind::Simple) {
           const BitIndex left_sw = extract_constant_index(left);
           const BitIndex right_sw = extract_constant_index(right);
-          expr_id = builder_.assign_range(expr_id, left_sw, right_sw, output_name, width, sign, range.left, range.right);
+          expr_id = expr_builder.assign_range(expr_id, left_sw, right_sw, output_name, width, sign, range.left, range.right);
         } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
                    kind == slang::ast::RangeSelectionKind::IndexedDown) {
           const BitIndex slice_width = extract_constant_index(right);
           assert(slice_width >= 0);
           const ExprId base_id = build_expr(left, expr_builder);
           const bool dir = (kind == slang::ast::RangeSelectionKind::IndexedUp);
-          expr_id = builder_.assign_part_select(expr_id, base_id, slice_width, dir, output_name, width, sign, range.left, range.right);
+          expr_id = expr_builder.assign_part_select(expr_id, base_id, slice_width, dir, output_name, width, sign, range.left, range.right);
         } else {
           throw std::logic_error("Unsupported range selection kind");
         }
+      } else if (lhs.kind == slang::ast::ExpressionKind::Concatenation) {
+        const auto &cat = lhs.as<slang::ast::ConcatenationExpression>();
+        for (auto it = cat.operands().rbegin(); it != cat.operands().rend(); ++it) {
+          lhs_stack.push_back(*it);
+        }
+        continue;
       } else {
-        // TODO: handle concat (probably make the output handling into lambda)
         throw std::logic_error("Unsupported LHS");
       }
-      bool nonblocking = assign.isNonBlocking();
-      if (!nonblocking) {
-        expr_builder.update_value(output_name, expr_id);
+      record(output_name, expr_id);
+    }
+    assert(remaining == 0);
+  }
+
+  template <typename Builder>
+  class SlangStmtLoweringVisitor final
+    : public slang::ast::ASTVisitor<SlangStmtLoweringVisitor<Builder>, true, false, false, true> {
+  private:
+    Builder &builder_;
+
+  public:
+    explicit SlangStmtLoweringVisitor(Builder &builder) : builder_(builder) {}
+
+    template<typename T>
+    void handle(const T&) {
+      throw std::logic_error(
+                             std::string("Unhandled AST node: ") + typeid(T).name()
+                             );
+    }
+
+    void handle(const slang::ast::VariableDeclStatement &stmt) {
+      const auto &symbol = stmt.symbol;
+      const std::string name(symbol.name);
+      builder_.add_local_variable(name);
+      if (const auto *init = symbol.getInitializer()) {
+        ExprId expr_id = build_expr(*init, builder_.get_expr_builder());
+        builder_.get_expr_builder().update_value(name, expr_id);
+        builder_.output_names().push_back(name);
+        builder_.output_nonblocking().push_back(false);
+        builder_.output_ids().push_back(expr_id);
       }
-      builder_.output_names().push_back(output_name);
-      builder_.output_nonblocking().push_back(nonblocking);
-      builder_.output_ids().push_back(expr_id);
+    }
+    
+    void handle(const slang::ast::ExpressionStatement &stmt) {
+      if (stmt.expr.kind != slang::ast::ExpressionKind::Assignment) {
+	throw std::logic_error("Non-assignment expression statement is unsupported");
+      }
+      const auto &assign = stmt.expr.as<slang::ast::AssignmentExpression>();
+      assert(!assign.isCompound()); // TODO: we need to handle this later
+      ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder());
+      const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
+      const bool nonblocking = assign.isNonBlocking();
+      std::unordered_map<std::string, ExprId> to_restore;
+      lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), [&](const std::string &output_name, ExprId expr_id) {
+        if (nonblocking && !to_restore.count(output_name)) {
+          to_restore[output_name] = builder_.get_expr_builder().get_current_value(output_name);
+        }
+        builder_.get_expr_builder().update_value(output_name, expr_id);
+        builder_.output_names().push_back(output_name);
+        builder_.output_nonblocking().push_back(nonblocking);
+        builder_.output_ids().push_back(expr_id);
+      });
+      for (const auto &kv : to_restore) {
+        builder_.get_expr_builder().update_value(kv.first, kv.second);
+      }
     }
     
     void handle(const slang::ast::ConditionalStatement &stmt) {
-      ExprBuilder &expr_builder = builder_.get_expr_builder();
       std::vector<ExprId> cond_ids;
       for (const auto &cond : stmt.conditions) {
-	ExprId cond_id = build_expr(*cond.expr, expr_builder);
+	ExprId cond_id = build_expr(*cond.expr, builder_.get_expr_builder());
 	cond_ids.push_back(cond_id);
       }
       assert(!cond_ids.empty());
       ExprId cond_id = kInvalidExprId;
       if (cond_ids.size() > 1) {
-	cond_id = expr_builder.create_and(std::move(cond_ids));
+	cond_id = builder_.get_expr_builder().create_and(std::move(cond_ids));
       } else {
 	cond_id = cond_ids[0];
       }
@@ -396,17 +576,16 @@ namespace abys::ir {
 
     void handle(const slang::ast::CaseStatement &stmt) {
       size_t index = builder_.get_context_stack_index();
-      ExprBuilder &expr_builder = builder_.get_expr_builder();
-      ExprId case_id = build_expr(stmt.expr, expr_builder);
+      ExprId case_id = build_expr(stmt.expr, builder_.get_expr_builder());
       std::vector<ExprId> case_values;
       for (auto &item : stmt.items) {
 	std::vector<ExprId> values;
 	for (auto *v : item.expressions) {
-	  values.push_back(build_expr(*v, expr_builder));
+	  values.push_back(build_expr(*v, builder_.get_expr_builder()));
 	}
 	ExprId value_id = kInvalidExprId;
 	if (values.size() > 1) {
-	  value_id = expr_builder.create_list(std::move(values));
+	  value_id = builder_.get_expr_builder().create_list(std::move(values));
 	} else {
 	  value_id = values[0];
 	}
@@ -432,30 +611,6 @@ namespace abys::ir {
       this->visitDefault(stmt);
       builder_.merge_context();
     }
-
-    void handle(const slang::ast::ImplicitEventControl &) {
-      if (!builder_.is_undecided()) {
-        throw std::logic_error("ImplicitEventControl in non-undecided block");
-      }
-      if (builder_.has_timing()) {
-        throw std::logic_error("ImplicitEventControl with existing timing");
-      }
-      builder_.set_comb_or_latch();
-    }
-    
-    void handle(const slang::ast::SignalEventControl &ev) {
-      ExprBuilder &expr_builder = builder_.get_expr_builder();
-      ExprId expr_id = build_expr(ev.expr, expr_builder);
-      ExprId iff_id = ev.iffCondition ? build_expr(*ev.iffCondition, expr_builder) : kInvalidExprId;
-      const bool posedge = ev.edge == slang::ast::EdgeKind::PosEdge;
-      const bool negedge = ev.edge == slang::ast::EdgeKind::NegEdge;
-      const bool both = ev.edge == slang::ast::EdgeKind::BothEdges;
-      builder_.add_timing(expr_id, iff_id, posedge || both, negedge || both);
-    }
-    
-    void handle(const slang::ast::EventListControl &ev) {
-      this->visitDefault(ev);
-    }
     
     void handle(const slang::ast::TimedStatement &stmt) {
       if(!builder_.is_root_context()) {
@@ -466,6 +621,37 @@ namespace abys::ir {
       }
       if(builder_.has_timing()) {
 	throw std::logic_error("Nested TimedStatement");
+      }
+      auto add_event = [&](const slang::ast::SignalEventControl &ev) {
+        const ExprId expr_id = build_expr(ev.expr, builder_.get_expr_builder());
+        const ExprId iff_id = ev.iffCondition ? build_expr(*ev.iffCondition, builder_.get_expr_builder()) : kInvalidExprId;
+        const bool pos = ev.edge == slang::ast::EdgeKind::PosEdge || ev.edge == slang::ast::EdgeKind::BothEdges;
+        const bool neg = ev.edge == slang::ast::EdgeKind::NegEdge || ev.edge == slang::ast::EdgeKind::BothEdges;
+        builder_.add_timing(expr_id, iff_id, pos, neg);
+      };
+      const auto &timing = stmt.timing;
+      switch (timing.kind) {
+      case slang::ast::TimingControlKind::SignalEvent:
+        add_event(timing.as<slang::ast::SignalEventControl>());
+        break;
+      case slang::ast::TimingControlKind::EventList: {
+        const auto &list = timing.as<slang::ast::EventListControl>();
+        for (const auto *tc : list.events) {
+          if (tc->kind != slang::ast::TimingControlKind::SignalEvent) {
+            throw std::logic_error("Unsupported timing event in list");
+          }
+          add_event(tc->as<slang::ast::SignalEventControl>());
+        }
+        break;
+      }
+      case slang::ast::TimingControlKind::ImplicitEvent:
+        if (!builder_.is_undecided() || builder_.has_timing()) {
+          throw std::logic_error("Invalid implicit event timing");
+        }
+        builder_.set_comb_or_latch();
+        break;
+      default:
+        throw std::logic_error("Unsupported timing control kind");
       }
       this->visitDefault(stmt);
       if (builder_.is_undecided()) {
@@ -503,7 +689,7 @@ namespace abys::ir {
       const ModuleId module_id = current_module_id();
       const NodeId node_id = builder_.create_operation(module_id);
       ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
-      ExprId expr_id = build_expr(expr, expr_builder);
+      const ExprId expr_id = build_expr(expr, expr_builder);
       expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
         builder_.add_node_input_spec(module_id, node_id, name, width, sign);
       });
@@ -575,6 +761,19 @@ namespace abys::ir {
 			     std::string("Unhandled AST node: ") + typeid(T).name()
 			     );
     }
+
+    void handle(const slang::ast::ParameterSymbol &symbol) {
+      const auto* init = symbol.getInitializer();
+      if (!init) {
+        throw std::logic_error("Parameter without initializer: " + std::string(symbol.name));
+      }
+      const ModuleId module_id = current_module_id();
+      const NodeId node_id = builder_.create_operation(module_id);
+      ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
+      const ExprId expr_id = build_expr(*init, expr_builder);
+      builder_.add_node_output_expr(module_id, node_id, std::string(symbol.name), expr_id, true);
+      create_variable(symbol, false);
+    }
     
     void handle(const slang::ast::PortSymbol &symbol) {
       this->visitDefault(symbol);
@@ -618,6 +817,8 @@ namespace abys::ir {
 
       module_stack_.push_back(module_id);
       this->visitDefault(symbol);
+      // TODO: sanitize multiple assignment on packed/unpacked variables
+      builder_.insert_ffs(module_id);
       builder_.wire_connections(module_id);
       module_stack_.pop_back();
     }
@@ -654,9 +855,30 @@ namespace abys::ir {
                                            expr_width(*expr), expr_sign(*expr));
 	    }
 	  } else if (port.direction == slang::ast::ArgumentDirection::Out) {
-            // TODO: output may not be named value
-	    builder_.add_node_output(module_id, node_id, extract_output_named_value(*expr),
-                                     port_width(port), port_sign(port));
+            assert(expr->kind == slang::ast::ExpressionKind::Assignment);
+            const auto &assign = expr->as<slang::ast::AssignmentExpression>();
+            assert(assign.right().kind == slang::ast::ExpressionKind::EmptyArgument);
+            const auto &lhs = assign.left();
+            const SignalWidth rhs_width = port_width(port); // TODO: handle unpacked array
+            const bool rhs_sign = port_sign(port);
+            if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
+              builder_.add_node_output(module_id, node_id, extract_named_value(lhs), rhs_width, rhs_sign);
+            } else {
+              const std::string temporary_name = builder_.generate_temporary_name();
+              const PortIndex port_idx = builder_.add_node_output(module_id, node_id, temporary_name, rhs_width, rhs_sign);
+              const NodeId op_id = builder_.create_operation(module_id);
+              ExprBuilder expr_builder(builder_.get_expr_graph(module_id, op_id));
+              ExprId rhs_id = expr_builder.find_or_create_input(temporary_name, rhs_width, rhs_sign);
+              std::unordered_map<std::string, ExprId> to_store;
+              lower_lhs_assignment(lhs, rhs_id, rhs_width, expr_builder, [&](const std::string &output_name, ExprId expr_id) {
+                expr_builder.update_value(output_name, expr_id);
+                to_store[output_name] = expr_id;
+              });
+              builder_.add_node_input(module_id, op_id, node_id, port_idx);
+              for (const auto &kv : to_store) {
+                builder_.add_node_output_expr(module_id, op_id, kv.first, kv.second, true);
+              }
+            }
 	  } else {
 	    assert(false);
 	  }
@@ -670,9 +892,22 @@ namespace abys::ir {
       const auto &assign = symbol.getAssignment();
       assert(assign.kind == slang::ast::ExpressionKind::Assignment);
       const auto &assign_expr = assign.as<slang::ast::AssignmentExpression>();
-      const std::string output_name = extract_named_value(assign_expr.left());
-      // TODO: handle non named value output
-      (void)create_expr_node(assign_expr.right(), output_name);
+      const ModuleId module_id = current_module_id();
+      const NodeId node_id = builder_.create_operation(module_id);
+      ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
+      ExprId rhs_id = build_expr(assign_expr.right(), expr_builder);
+      const SignalWidth rhs_width = expr_builder.get_width(rhs_id);
+      std::unordered_map<std::string, ExprId> to_store;
+      lower_lhs_assignment(assign_expr.left(), rhs_id, rhs_width, expr_builder, [&](const std::string &output_name, ExprId expr_id) {
+        expr_builder.update_value(output_name, expr_id);
+        to_store[output_name] = expr_id;
+      });
+      expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
+        builder_.add_node_input_spec(module_id, node_id, name, width, sign);
+      });
+      for (const auto &kv : to_store) {
+        builder_.add_node_output_expr(module_id, node_id, kv.first, kv.second, true);
+      }
     }
     
     void handle(const slang::ast::RootSymbol &symbol) {
@@ -708,26 +943,45 @@ namespace abys::ir {
       stmt_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
         builder_.add_node_input_spec(module_id, node_id, name, width, sign);
       });
-      PortIndex port_idx = 0;
+      std::string clk_name;
+      SignalWidth clk_width;
+      bool clk_sign;
       if (stmt_builder.is_ff()) {
-        builder_.add_node_output_expr(module_id, node_id, "", stmt_builder.get_clock(), true);
-        port_idx++;
+        stmt_builder.get_clock_spec(clk_name, clk_width, clk_sign);
       }
       stmt_builder.for_each_output([&](const std::string &name, ExprId expr_id) {
+        // TODO: latch inference is deferred
+        const PortIndex port_idx = builder_.add_node_output_expr(module_id, node_id, name, expr_id, stmt_builder.is_comb());
         if(stmt_builder.is_ff()) {
-          const NodeId ff_id = builder_.create_ff(module_id);
-          builder_.add_node_output_expr(module_id, node_id, "", expr_id, false);
-          builder_.add_node_input(module_id, ff_id, node_id, port_idx);
-          port_idx++;
-          builder_.add_node_input(module_id, ff_id, node_id, 0); // clock has port_idx = 0
-          const ExprGraph::Node &expr_node = builder_.get_expr_graph(module_id, node_id).nodes[expr_id];
-          builder_.add_node_output(module_id, ff_id, name, expr_node.width, expr_node.sign);
-        } else {
-          // latch inference is deferred
-          builder_.add_node_output_expr(module_id, node_id, name, expr_id, stmt_builder.is_comb());
-          port_idx++;
+          builder_.record_ff(module_id, name, {clk_name, clk_width, clk_sign}, node_id, port_idx);
         }
       });
+    }
+
+    void handle(const slang::ast::SubroutineSymbol &symbol) {
+      if (symbol.subroutineKind != slang::ast::SubroutineKind::Function) {
+        throw std::logic_error("Task lowering not supported: " + std::string(symbol.name));
+      }
+      Tig::Subroutine subr;
+      subr.subr_ptr = &symbol;
+      subr.name = std::string(symbol.name);
+      for (auto *arg : symbol.getArguments()) {
+        // TODO: handle packed/unpacked array
+        if (arg->direction != slang::ast::ArgumentDirection::In) {
+          throw std::logic_error("Only input formals are supported in function lowering: " + std::string(symbol.name) + "." + std::string(arg->name));
+        }
+        const auto &type = arg->getType();
+        subr.inputs.emplace_back(Tig::Subroutine::Port{std::string(arg->name), type.getBitstreamWidth(), type.isSigned()});
+      }
+      StmtBuilder stmt_builder(subr.expr_graph);
+      SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder);
+      symbol.getBody().visit(stmt_visitor);
+      const ExprId ret = stmt_builder.get_expr_builder().get_current_value(symbol.name);
+      if (ret == kInvalidExprId) {
+        throw std::logic_error("Function has no return assignment: " + std::string(symbol.name));
+      }
+      subr.expr_root = ret;
+      builder_.add_subroutine(std::move(subr)); // add API
     }
   };
   
@@ -735,6 +989,7 @@ namespace abys::ir {
   void lower_slang_ast_to_ir(const slang::ast::RootSymbol &root, Builder &builder) {
     SlangLoweringVisitor<Builder> visitor(builder);
     root.visit(visitor);
+    builder.flatten_calls();
   }
   
 } // namespace abys::ir

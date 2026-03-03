@@ -18,6 +18,9 @@ namespace abys::ir {
   ExprGraph::Node &ExprBuilder::get_node(ExprId id) {
     return graph_.nodes[id];
   }
+  SignalWidth ExprBuilder::get_width(ExprId id) const {
+    return graph_.nodes[id].width;
+  }
 
   ExprId ExprBuilder::get_constant_zero() const {
     return graph_.constant_zero;
@@ -173,6 +176,9 @@ namespace abys::ir {
   }
   ExprId ExprBuilder::create_mul(ExprId a, ExprId b) {
     return create_binary(ExprGraph::Op::kMul, a, b);
+  }
+  ExprId ExprBuilder::create_div(ExprId a, ExprId b) {
+    return create_binary(ExprGraph::Op::kDiv, a, b);
   }
   
   ExprId ExprBuilder::create_shift(ExprGraph::Op op, ExprId data, ExprId shamt) {
@@ -345,12 +351,12 @@ namespace abys::ir {
     return create_sub(offset, index);
   }
   ExprId ExprBuilder::create_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb) {
+    const ExprId pos = normalize_index_expr(index, msb, lsb);
     const ExprId id = create_node();
     auto &node = get_node(id);
     node.op = ExprGraph::Op::kRange;
     node.width = 1;
     node.sign = false;
-    const ExprId pos = normalize_index_expr(index, msb, lsb);
     node.operands = {data, pos};
     return id;
   }
@@ -365,12 +371,12 @@ namespace abys::ir {
       is_reverse = true;
       std::swap(left_pos, right_pos);
     }
+    const ExprId pos = find_or_create_const(left_pos);
     const ExprId id = create_node();
     auto &node = get_node(id);
     node.op = ExprGraph::Op::kRange;
     node.width = left_pos - right_pos + 1;
     node.sign = false;
-    const ExprId pos = find_or_create_const(left_pos);
     node.operands = {data, pos};
     if (is_reverse) {
       return create_reverse(id);
@@ -398,6 +404,16 @@ namespace abys::ir {
     return id;    
   }
 
+  ExprId ExprBuilder::create_gather(std::vector<ExprId> operands) {
+    assert(!operands.empty());
+    const ExprId id = create_node();
+    auto &node = get_node(id);
+    node.op = ExprGraph::Op::kGather;
+    node.width = operands.size();
+    node.sign = false;
+    node.operands = std::move(operands);
+    return id;
+  }
   ExprId ExprBuilder::create_masked_assign(ExprId current, ExprId next, ExprId base, ExprId slice_width, SignalWidth width, bool sign) {
     const ExprId id = create_node();
     auto &node = get_node(id);
@@ -406,6 +422,49 @@ namespace abys::ir {
     node.sign = sign;
     assert(get_node(slice_width).op == ExprGraph::Op::kConst);
     node.operands = {current, next, base, slice_width};
+    return id;
+  }
+  
+  ExprId ExprBuilder::assign_select(ExprId data, ExprId index, std::string_view name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
+    ExprId current = get_current_value(name);
+    ExprId pos = normalize_index_expr(index, msb, lsb);
+    return create_masked_assign(current, data, pos, get_constant_one(), width, sign);
+  }
+  ExprId ExprBuilder::assign_range(ExprId data, BitIndex left, BitIndex right, std::string_view name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
+    ExprId current = get_current_value(name);
+    BitIndex left_pos = normalize_index(left, msb, lsb);
+    BitIndex right_pos = normalize_index(right, msb, lsb);
+    if (left_pos < right_pos) {
+      data = create_reverse(data);
+      std::swap(left_pos, right_pos);
+    }
+    ExprId left_id = find_or_create_const(left_pos);
+    ExprId width_id = find_or_create_const(left_pos - right_pos + 1);
+    return create_masked_assign(current, data, left_id, width_id, width, sign);
+  }
+  ExprId ExprBuilder::assign_part_select(ExprId data, ExprId base, SignalWidth slice_width, bool dir, std::string_view name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
+    ExprId current = get_current_value(name);
+    ExprId left = base;
+    if (dir) {
+      data = create_reverse(data);
+      assert(slice_width > 0);
+      const ExprId offset = find_or_create_const(slice_width - 1);
+      left = create_add(base, offset);
+    }
+    ExprId pos = normalize_index_expr(left, msb, lsb);
+    ExprId width_id = find_or_create_const(slice_width);
+    return create_masked_assign(current, data, pos, width_id, width, sign);
+  }
+
+  ExprId ExprBuilder::create_call(const void *subr_ptr, std::string name, std::vector<ExprId> operands, SignalWidth width, bool sign) {
+    // TODO: find_or_create?
+    const ExprId id = create_node();
+    auto &node = get_node(id);
+    node.op = ExprGraph::Op::kCall;
+    node.width = width;
+    node.sign = sign;
+    node.operands = std::move(operands);
+    graph_.calls.emplace_back(ExprGraph::Call{id, subr_ptr, std::move(name)});
     return id;
   }
 
@@ -430,15 +489,15 @@ namespace abys::ir {
     return id;
   }
 
-  ExprId ExprBuilder::get_current_value(const std::string &name) const {
+  ExprId ExprBuilder::get_current_value(std::string_view name) const {
     auto it = name_map_.find(name);
     if (it != name_map_.end()) {
       return it->second;
     }
     return kInvalidExprId;
   }
-  void ExprBuilder::update_value(const std::string &name, ExprId id) {
-    name_map_[name] = id;
+  void ExprBuilder::update_value(std::string name, ExprId id) {
+    name_map_.insert_or_assign(std::move(name), id);
   }
   
 } // namespace abys::ir

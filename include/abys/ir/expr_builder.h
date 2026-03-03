@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "abys/util/string_map.h"
 #include "abys/ir/expr.h"
 
 namespace abys::ir {
@@ -17,6 +18,7 @@ namespace abys::ir {
     ExprId get_constant_one() const;
 
     ExprGraph::Node &get_node(ExprId id);
+    SignalWidth get_width(ExprId id) const;
     
     ExprId find_or_create_input(std::string name, SignalWidth width, bool sign);
     ExprId find_or_create_const(std::string value, SignalWidth width, bool sign);
@@ -39,6 +41,7 @@ namespace abys::ir {
     ExprId create_add(ExprId a, ExprId b);
     ExprId create_sub(ExprId a, ExprId b);
     ExprId create_mul(ExprId a, ExprId b);
+    ExprId create_div(ExprId a, ExprId b);
   
     ExprId create_shl(ExprId data, ExprId shamt);
     ExprId create_shr(ExprId data, ExprId shamt);
@@ -68,10 +71,17 @@ namespace abys::ir {
     ExprId create_reverse(ExprId data);
     ExprId create_range(ExprId data, BitIndex left, BitIndex right, BitIndex msb, BitIndex lsb); // normalize and stores left as operands[1]
     ExprId create_part_select(ExprId data, ExprId base, SignalWidth width, bool dir, BitIndex msb, BitIndex lsb); // maps to kRange
-    
+
+    ExprId create_gather(std::vector<ExprId> operands);
     ExprId create_masked_assign(ExprId current, ExprId next, ExprId base, ExprId slice_width, SignalWidth width, bool sign);
+    
+    ExprId assign_select(ExprId data, ExprId index, std::string_view name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
+    ExprId assign_range(ExprId data, BitIndex left, BitIndex right, std::string_view name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
+    ExprId assign_part_select(ExprId data, ExprId base, SignalWidth slice_width, bool dir, std::string_view name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
 
     ExprId create_array_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb, SignalWidth width, bool sign);
+
+    ExprId create_call(const void *subr_ptr, std::string name, std::vector<ExprId> operands, SignalWidth width, bool sign);
 
     ExprId create_both_edge(ExprId operand);
 
@@ -83,12 +93,12 @@ namespace abys::ir {
       }
     }
 
-    ExprId get_current_value(const std::string &name) const;
-    void update_value(const std::string &name, ExprId id);
+    ExprId get_current_value(std::string_view name) const;
+    void update_value(std::string name, ExprId id);
 
   private:
     ExprGraph &graph_;
-    std::unordered_map<std::string, ExprId> name_map_;
+    abys::util::StringMap<ExprId> name_map_;
   
     ExprId create_node();
     

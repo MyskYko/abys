@@ -16,9 +16,10 @@ namespace abys::ir {
     explicit StmtBuilder(ExprGraph &expr_graph);
     
     ExprBuilder &get_expr_builder();
-    std::vector<std::string> &output_names();
+    std::vector<std::string> &output_names(); // TODO: this and the following two may be replaced by add_output(string, bool, ExprId) API
     std::vector<bool> &output_nonblocking();
     std::vector<ExprId> &output_ids();
+    void add_local_variable(std::string name);
     size_t get_context_stack_index() const;
     
     const ExprBuilder &get_const_expr_builder() const;
@@ -47,12 +48,9 @@ namespace abys::ir {
     void merge_conditional(ExprId cond_id);
     void merge_case(ExprId selector_id, const std::vector<ExprId> &case_values, size_t stack_index);
 
-    ExprId assign_select(ExprId expr_id, ExprId index_id, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
-    ExprId assign_range(ExprId expr_id, BitIndex left, BitIndex right, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
-    ExprId assign_part_select(ExprId expr_id, ExprId base_id, SignalWidth slice_width, bool dir, const std::string &name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
-
     // API for exporting info for creating a tig node
     ExprId get_clock();
+    void get_clock_spec(std::string &name, SignalWidth &width, bool &sign) const;
     
     template<typename Func>
     void for_each_input(Func &&func) const {
@@ -79,6 +77,7 @@ namespace abys::ir {
       }
       for (const auto &kv : info) {
 	if (kv.second.seen_blocking && kv.second.seen_nonblocking) {
+          // TODO: we do not really enforce always_ff with blocking yet
 	  throw std::logic_error("Mixed blocking and nonblocking assignments to " + kv.first);
 	}
 	func(kv.first, kv.second.expr_id);
