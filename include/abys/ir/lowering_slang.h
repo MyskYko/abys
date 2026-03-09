@@ -274,6 +274,12 @@ namespace abys::ir {
       expr_stack_.pop_back();
       ExprId id;
       switch (expr.op) {
+      case slang::ast::BinaryOperator::LogicalOr:
+        id = builder_.create_logical_or(lhs, rhs);
+        break;
+      case slang::ast::BinaryOperator::LogicalAnd:
+        id = builder_.create_logical_and(lhs, rhs);
+        break;
       case slang::ast::BinaryOperator::BinaryAnd:
         id = builder_.create_and({lhs, rhs});
         break;
@@ -931,11 +937,19 @@ namespace abys::ir {
       const NodeId node_id = builder_.create_operation(module_id);
       StmtBuilder stmt_builder(builder_.get_expr_graph(module_id, node_id));
       switch (symbol.procedureKind) {
-      case slang::ast::ProceduralBlockKind::AlwaysComb: stmt_builder.set_comb(); break;
-      case slang::ast::ProceduralBlockKind::AlwaysLatch: stmt_builder.set_latch(); break;
-      case slang::ast::ProceduralBlockKind::AlwaysFF: stmt_builder.set_ff(); break;
-      case slang::ast::ProceduralBlockKind::Always: break; // undecided
-      default: throw std::logic_error("Unknown procedural block kind");
+      case slang::ast::ProceduralBlockKind::AlwaysComb:
+        stmt_builder.set_comb();
+        break;
+      case slang::ast::ProceduralBlockKind::AlwaysLatch:
+        stmt_builder.set_latch();
+        break;
+      case slang::ast::ProceduralBlockKind::AlwaysFF:
+        stmt_builder.set_ff();
+        break;
+      case slang::ast::ProceduralBlockKind::Always:
+        break; // undecided
+      default:
+        throw std::logic_error("Unknown procedural block kind");
       }
       SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder);
       const slang::ast::Statement& stmt = symbol.getBody();
@@ -943,25 +957,33 @@ namespace abys::ir {
       stmt_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
         builder_.add_node_input_spec(module_id, node_id, name, width, sign);
       });
-      std::string clk_name;
-      SignalWidth clk_width;
-      bool clk_sign;
-      if (stmt_builder.is_ff()) {
-        stmt_builder.get_clock_spec(clk_name, clk_width, clk_sign);
-      }
-      stmt_builder.for_each_output([&](const std::string &name, ExprId expr_id) {
+      if(!stmt_builder.is_ff()) {
         // TODO: latch inference is deferred
-        const PortIndex port_idx = builder_.add_node_output_expr(module_id, node_id, name, expr_id, stmt_builder.is_comb());
-        if(stmt_builder.is_ff()) {
-          builder_.record_ff(module_id, name, {clk_name, clk_width, clk_sign}, node_id, port_idx);
-        }
+        stmt_builder.for_each_output([&](const std::string &name, ExprId expr_id) {
+          builder_.add_node_output_expr(module_id, node_id, name, expr_id, stmt_builder.is_comb());
+        });
+        return;
+      }
+      std::vector<std::pair<std::string, ExprId>> outputs;
+      stmt_builder.for_each_output([&](const std::string &name, ExprId expr_id) {
+        outputs.emplace_back(name, expr_id);
       });
+      std::string clk_name, rst_name;
+      SignalWidth clk_width, rst_width;
+      bool clk_sign, rst_sign;
+      EdgeKind clk_edge, rst_edge;
+      stmt_builder.get_timing_spec(outputs, clk_name, clk_width, clk_sign, clk_edge, rst_name, rst_width, rst_sign, rst_edge);
+      for (const auto &kv : outputs) {
+        const PortIndex port_idx = builder_.add_node_output_expr(module_id, node_id, kv.first, kv.second, stmt_builder.is_comb());
+        builder_.record_ff(module_id, kv.first, {clk_name, clk_width, clk_sign}, clk_edge, {rst_name, rst_width, rst_sign}, rst_edge, node_id, port_idx);
+      }
     }
 
     void handle(const slang::ast::SubroutineSymbol &symbol) {
       if (symbol.subroutineKind != slang::ast::SubroutineKind::Function) {
         throw std::logic_error("Task lowering not supported: " + std::string(symbol.name));
       }
+      // TODO: it is better to remove dependency on tig structure; use builder api to create a subroutine
       Tig::Subroutine subr;
       subr.subr_ptr = &symbol;
       subr.name = std::string(symbol.name);

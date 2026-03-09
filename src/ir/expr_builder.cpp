@@ -1,6 +1,7 @@
 #include <cassert>
 #include <algorithm>
 #include <bitset>
+#include <stdexcept>
 
 #include "abys/ir/expr_builder.h"
 
@@ -79,9 +80,9 @@ namespace abys::ir {
     }
     std::bitset<SignalWidthBitSize> bits(index);
     std::string str = bits.to_string();
-    size_t pos = str.find_last_not_of('0');
+    size_t pos = str.find_first_not_of('0');
     assert(pos != std::string::npos);
-    str.erase(pos + 1);
+    str.erase(0, pos);
     const ExprId id = find_or_create_const(std::to_string(str.length()) + "'b" + str, str.length(), false);
     if (negative) {
       return create_unary_minus(id);
@@ -157,6 +158,30 @@ namespace abys::ir {
     return create_unary(ExprGraph::Op::kUnaryMinus, a);
   }
 
+  ExprId ExprBuilder::create_logical_binary(ExprGraph::Op op, ExprId a, ExprId b) {
+    const ExprId id = create_node();
+    const auto &a_node = get_node(a);
+    if (a_node.width > 1) {
+      a = create_or_reduce(a);
+    }
+    const auto &b_node = get_node(b);
+    if (b_node.width > 1) {
+      b = create_or_reduce(b);
+    }
+    auto &node = get_node(id);
+    node.op = op;
+    node.width = 1;
+    node.sign = false;
+    node.operands = {a, b};
+    return id;
+  }
+  ExprId ExprBuilder::create_logical_and(ExprId a, ExprId b) {
+    return create_logical_binary(ExprGraph::Op::kAnd, a, b);
+  }
+  ExprId ExprBuilder::create_logical_or(ExprId a, ExprId b) {
+    return create_logical_binary(ExprGraph::Op::kOr, a, b);
+  }
+  
   ExprId ExprBuilder::create_binary(ExprGraph::Op op, ExprId a, ExprId b) {
     const ExprId id = create_node();
     auto &node = get_node(id);
@@ -498,6 +523,45 @@ namespace abys::ir {
   }
   void ExprBuilder::update_value(std::string name, ExprId id) {
     name_map_.insert_or_assign(std::move(name), id);
+  }
+
+  void ExprBuilder::get_input_spec(ExprId id, ExprId &input_id, std::string &name, SignalWidth &width, bool &sign) const {
+    input_id = id;
+    const auto &node0 = graph_.nodes[input_id];
+    if (node0.op == ExprGraph::Op::kConvert) {
+      input_id = node0.operands[0];
+    }
+    const auto &node = graph_.nodes[input_id];
+    if (node.op != ExprGraph::Op::kInput) {
+      throw std::logic_error("Cannot obtain input spec of non-input expression");
+    }
+    bool found = false;
+    for (const auto &kv : graph_.inputs) {
+      if (kv.second == input_id) {
+        name = kv.first;
+        found = true;
+        break;
+      }
+    }
+    assert(found);
+    width = node.width;
+    sign = node.sign;
+  }
+
+  bool ExprBuilder::check_dependency(ExprId id, ExprId target) const {
+    if (id == target) {
+      return true;
+    }
+    if (id == kInvalidExprId) {
+      return false;
+    }
+    const auto &node = graph_.nodes[id];
+    for (ExprId operand : node.operands) {
+      if (check_dependency(operand, target)) {
+        return true;
+      }
+    }
+    return false;
   }
   
 } // namespace abys::ir

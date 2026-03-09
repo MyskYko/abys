@@ -124,8 +124,9 @@ namespace abys::ir {
     return node_id;
   }
 
-  void TigBuilder::record_ff(ModuleId module_id, std::string name, SignalSpec clk_spec, NodeId node_id, PortIndex port_idx) {
-    design_.modules[module_id].pending_ffs.emplace_back(std::move(name), std::move(clk_spec), node_id, port_idx);
+  void TigBuilder::record_ff(ModuleId module_id, std::string name, SignalSpec clk_spec, EdgeKind clk_edge, SignalSpec rst_spec, EdgeKind rst_edge, NodeId node_id, PortIndex port_idx) {
+    assert(!clk_spec.name.empty());
+    design_.modules[module_id].pending_ffs.emplace_back(Tig::Module::PendingFf{std::move(name), std::move(clk_spec), clk_edge, std::move(rst_spec), rst_edge, node_id, port_idx});
   }
   
   void TigBuilder::add_node_input(ModuleId module_id, NodeId node_id, NodeId input_id, PortIndex port_idx) {
@@ -211,18 +212,39 @@ namespace abys::ir {
 
   void TigBuilder::insert_ffs(ModuleId module_id) {
     auto &module = design_.modules[module_id];
-    for (const auto &[name, clk_spec, node_id, port_idx] : module.pending_ffs) {
-      auto it = module.signal_map.find(name);
+    for (const auto &kv : module.pending_ffs) {
+      // name of ff, clk spec, data node, data port index
+      auto it = module.signal_map.find(kv.name);
       if (it == module.signal_map.end()) {
-        throw std::logic_error("insert_ffs: signal not found: " + name);
+        throw std::logic_error("insert_ffs: signal not found: " + kv.name);
       }
       Node &old_node = module.nodes[it->second.node_id];
       if (old_node.kind == NodeKind::kFf) {
-        assert(input_specs[module_id][it->second.node_id].size() == 2);
+        assert(input_specs[module_id][it->second.node_id].size() == 2 || input_specs[module_id][it->second.node_id].size() == 3);
         const SignalSpec clk_spec_old = input_specs[module_id][it->second.node_id][1];
-        if (clk_spec.name != clk_spec_old.name || clk_spec.width != clk_spec_old.width || clk_spec.sign != clk_spec_old.sign) {
-        // TODO: create another ff
-          throw std::logic_error("Different FF clocks for signal: " + name);
+        if (kv.clk_spec.name != clk_spec_old.name ||
+            kv.clk_spec.width != clk_spec_old.width ||
+            kv.clk_spec.sign != clk_spec_old.sign ||
+            kv.clk_edge != old_node.clk_edge) {
+          // TODO: create another ff
+          throw std::logic_error("Different FF clocks for signal: " + kv.name);
+        }
+        if (!kv.rst_spec.name.empty()) {
+          if (input_specs[module_id][it->second.node_id].size() != 3) {
+            // TODO: create another ff
+            throw std::logic_error("Different FF reset usage for signal: " + kv.name);
+          }
+          const SignalSpec rst_spec_old = input_specs[module_id][it->second.node_id][2];
+          if (kv.rst_spec.name != rst_spec_old.name ||
+              kv.rst_spec.width != rst_spec_old.width ||
+              kv.rst_spec.sign != rst_spec_old.sign ||
+              kv.rst_edge != old_node.rst_edge) {
+            // TODO: create another ff
+            throw std::logic_error("Different FF resets for signal: " + kv.name);
+          }
+        } else if (input_specs[module_id][it->second.node_id].size() == 3) {
+          // TODO: create another ff
+          throw std::logic_error("Different FF reset usage for signal: " + kv.name);
         }
         continue;
       }
@@ -232,8 +254,13 @@ namespace abys::ir {
       Node &ff_node = module.nodes[ff_id];
       const auto spec = get_signal_spec(module_id, it->second);
       add_node_input(module_id, ff_id, it->second.node_id, it->second.port_idx);
-      add_node_input_spec(module_id, ff_id, clk_spec.name, clk_spec.width, clk_spec.sign);
-      ff_node.outputs.emplace_back(name, spec.width, spec.sign);
+      add_node_input_spec(module_id, ff_id, kv.clk_spec.name, kv.clk_spec.width, kv.clk_spec.sign);
+      ff_node.clk_edge = kv.clk_edge;
+      if (!kv.rst_spec.name.empty()) {
+        add_node_input_spec(module_id, ff_id, kv.rst_spec.name, kv.rst_spec.width, kv.rst_spec.sign);
+        ff_node.rst_edge = kv.rst_edge;
+      }
+      ff_node.outputs.emplace_back(kv.name, spec.width, spec.sign);
       ff_node.expr_roots.push_back(kInvalidExprId);
       ff_node.combs.push_back(false);
       it->second = Signal{ff_id, 0};

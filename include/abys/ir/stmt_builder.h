@@ -35,6 +35,7 @@ namespace abys::ir {
     
     bool is_root_context() const;
     bool is_comb() const;
+    bool is_comb_or_latch() const;
     bool is_ff() const;
     bool is_undecided() const;
     
@@ -49,8 +50,9 @@ namespace abys::ir {
     void merge_case(ExprId selector_id, const std::vector<ExprId> &case_values, size_t stack_index);
 
     // API for exporting info for creating a tig node
-    ExprId get_clock();
-    void get_clock_spec(std::string &name, SignalWidth &width, bool &sign) const;
+    void get_timing_spec(const std::vector<std::pair<std::string, ExprId>> &outputs,
+                         std::string &clk_name, SignalWidth &clk_width, bool &clk_sign, EdgeKind &clk_edge,
+                         std::string &rst_name, SignalWidth &rst_width, bool &rst_sign, EdgeKind &rst_edge) const;
     
     template<typename Func>
     void for_each_input(Func &&func) const {
@@ -109,13 +111,6 @@ namespace abys::ir {
     std::vector<Context> context_stack_;
 
     void transfer_output(const Context &from, size_t i, ExprId expr_id);
-
-    enum class EdgeKind {
-      kNone,
-      kPosedge,
-      kNegedge,
-      kBothEdges
-    };
     
     struct TimingEvent {
       EdgeKind edge = EdgeKind::kNone;

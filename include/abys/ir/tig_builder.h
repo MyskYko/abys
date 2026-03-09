@@ -56,7 +56,7 @@ namespace abys::ir {
     NodeId create_instance(ModuleId module_id, std::string name, ModuleId instance_module_id);
     NodeId create_operation(ModuleId module_id);
     NodeId create_merge(ModuleId module_id);
-    void record_ff(ModuleId module_id, std::string name, SignalSpec clk_spec, NodeId node_id, PortIndex port_idx);
+    void record_ff(ModuleId module_id, std::string name, SignalSpec clk_spec, EdgeKind clk_edge, SignalSpec rst_spec, EdgeKind rst_edge, NodeId node_id, PortIndex port_idx);
 
     void add_node_input(ModuleId module_id, NodeId node_id, NodeId input_id, PortIndex port_idx = 0);
     void add_node_input_spec(ModuleId module_id, NodeId node_id, std::string name, SignalWidth width, bool sign);

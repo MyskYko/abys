@@ -47,6 +47,8 @@ namespace abys::ir {
 	NodeKind kind = NodeKind::kUnknown;
 	std::string name; // instance name
 	ModuleId module_id = kInvalidModuleId;
+        EdgeKind clk_edge = EdgeKind::kNone; // for ff
+        EdgeKind rst_edge = EdgeKind::kNone; // for ff with acync reset
 	std::vector<EdgeRef> inputs;
 	struct Output {
 	  std::string name;
@@ -80,6 +82,16 @@ namespace abys::ir {
         SignalWidth width = 0;
         bool sign = false;
       };
+
+      struct PendingFf {
+        std::string name;
+        Node::Output clk_spec;
+        EdgeKind clk_edge;
+        Node::Output rst_spec;
+        EdgeKind rst_edge;
+        NodeId node_id;
+        PortIndex port_idx;
+      };
       
       std::string name;
       std::vector<Port> input_ports;
@@ -88,8 +100,7 @@ namespace abys::ir {
       std::vector<Variable> variables;
       std::vector<PackedVariable> packed_variables;
       std::unordered_map<std::string, EdgeRef> signal_map; // TOOD: move to builder?
-      std::vector<std::tuple<std::string, Node::Output, NodeId, PortIndex>> pending_ffs; // name of ff, clk spec, data node, data port index
-      // TOOD: move to builder?
+      std::vector<PendingFf> pending_ffs; // TOOD: move to builder?
     };
 
     struct Subroutine {

@@ -1,3 +1,4 @@
+#include <stdexcept>
 #include <cassert>
 
 #include "abys/ir/stmt_builder.h"
@@ -63,6 +64,9 @@ namespace abys::ir {
   bool StmtBuilder::is_comb() const {
     return policy_ == Policy::Comb;
   }
+  bool StmtBuilder::is_comb_or_latch() const {
+    return policy_ == Policy::CombOrLatch;
+  }
   bool StmtBuilder::is_ff() const {
     return policy_ == Policy::Ff;
   }
@@ -84,7 +88,7 @@ namespace abys::ir {
       edge_kind = EdgeKind::kNegedge;
     }
     if (edge_kind == EdgeKind::kNone) {
-      if (!is_undecided()) {
+      if (!is_comb_or_latch() && !is_undecided()) {
         throw std::logic_error("Level-sensitive timing in non-undecided block");
       }
       set_comb_or_latch();
@@ -241,72 +245,59 @@ namespace abys::ir {
       context_stack_.pop_back();
     }
   }
-  
-  ExprId StmtBuilder::get_clock() {
-    ExprBuilder &expr_builder = get_expr_builder();
-    if (timing_events_.size() != 1) {
-      // TODO: handle async reset
-      throw std::logic_error("FF requires exactly one timing event for now");
-    }
-    const auto &ev = timing_events_[0];
-    if (ev.edge == EdgeKind::kNone) {
-      throw std::logic_error("FF timing must be edge-triggered");
-    }
-    // TODO: handle iff (enable) too
-    ExprId clk_id = ev.expr_id;
-    switch (ev.edge) {
-    case EdgeKind::kPosedge:
-      return clk_id;
-    case EdgeKind::kNegedge:
-      return expr_builder.create_logical_not(clk_id);
-    case EdgeKind::kBothEdges:
-      return expr_builder.create_both_edge(clk_id);
-    case EdgeKind::kNone:
-    default:
-      throw std::logic_error("Invalid FF edge kind");
-    }
-  }
 
-  void StmtBuilder::get_clock_spec(std::string &name, SignalWidth &width, bool &sign) const {
-    if (timing_events_.size() != 1) {
-      throw std::logic_error("FF requires exactly one timing event for now");
+  void StmtBuilder::get_timing_spec(const std::vector<std::pair<std::string, ExprId>> &outputs, std::string &clk_name, SignalWidth &clk_width, bool &clk_sign, EdgeKind &clk_edge, std::string &rst_name, SignalWidth &rst_width, bool &rst_sign, EdgeKind &rst_edge) const {
+    if (timing_events_.size() != 1 && timing_events_.size() != 2) {
+      throw std::logic_error("FF requires one or two timing events");
     }
-    const auto &ev = timing_events_[0];
-    if (ev.edge == EdgeKind::kNone) {
-      throw std::logic_error("FF timing must be edge-triggered");
-    }
-    if (ev.edge == EdgeKind::kNegedge || ev.edge == EdgeKind::kBothEdges) {
-      // TODO: support negedge / bothedge clock spec
-      throw std::logic_error("Only posedge clock is supported in get_clock_spec");
-    }
-    ExprId src_id = ev.expr_id;
-    if (src_id == kInvalidExprId) {
-      throw std::logic_error("Invalid clock expression");
-    }
-    const auto &src_node0 = expr_graph_.nodes[src_id];
-    if (src_node0.op == ExprGraph::Op::kConvert) {
-      if (src_node0.operands.empty()) {
-        throw std::logic_error("Malformed clock convert node");
+    const ExprBuilder &expr_builder = contexts_.back().expr_builder;
+    auto get_input_spec = [&](int index, ExprId &input_id, std::string &name, SignalWidth &width, bool &sign, EdgeKind &edge) {
+      const auto &ev = timing_events_[index];
+      if (ev.edge == EdgeKind::kNone) {
+        throw std::logic_error("FF timing must be edge-triggered");
       }
-      src_id = src_node0.operands[0];
-    }
-    const auto &src_node = expr_graph_.nodes[src_id];
-    if (src_node.op != ExprGraph::Op::kInput) {
-      throw std::logic_error("Clock must be a direct input signal for now");
-    }
-    bool found = false;
-    for (const auto &kv : expr_graph_.inputs) {
-      if (kv.second == src_id) {
-        name = kv.first;
-        found = true;
-        break;
+      edge = ev.edge;
+      expr_builder.get_input_spec(ev.expr_id, input_id, name, width, sign);
+    };
+    if (timing_events_.size() == 1) {
+      ExprId input_id;
+      get_input_spec(0, input_id, clk_name, clk_width, clk_sign, clk_edge);
+      return;
+    } else {
+      for (int i = 0; i < 2; i++) {
+        // TODO: check if rst is used only as an if-cond for debugging
+        ExprId input_id;
+        std::string name;
+        SignalWidth width;
+        bool sign;
+        EdgeKind edge;
+        get_input_spec(i, input_id, name, width, sign, edge);
+        bool fUsed = false;
+        for (const auto &kv : outputs) {
+          if (expr_builder.check_dependency(kv.second, input_id)) {
+            fUsed = true;
+            break;
+          }
+        }
+        if (fUsed) {
+          if (!rst_name.empty()) {
+            throw std::logic_error("Ambiguous reset inference");
+          }
+          rst_name = name;
+          rst_width = width;
+          rst_sign = sign;
+          rst_edge = edge;
+        } else {
+          if (!clk_name.empty()) {
+            throw std::logic_error("Ambiguous clock inference");
+          }
+          clk_name = name;
+          clk_width = width;
+          clk_sign = sign;
+          clk_edge = edge;
+        }
       }
     }
-    if (!found) {
-      throw std::logic_error("Clock input name not found");
-    }
-    width = src_node.width;
-    sign = src_node.sign;
     // TODO: handle iff (enable) too
   }
 

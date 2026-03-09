@@ -1,4 +1,5 @@
 #include <cassert>
+#include <stdexcept>
 #include <unordered_set>
 #include <sstream>
 
@@ -130,15 +131,15 @@ namespace abys::ir {
         }
         first = false;
         const auto &p = child.input_ports[i];
-        const auto &dref = node.inputs[i];
-        const auto &d_node = module.nodes[dref.node_id];        
-        const std::string d_name = d_node.outputs[dref.port_idx].name;
+        const auto &data_ref = node.inputs[i];
+        const auto &data_node = module.nodes[data_ref.node_id];        
+        const std::string data_name = data_node.outputs[data_ref.port_idx].name;
         os << "    ." << p.name << "(";
-        if (d_name.empty()) { // handle convert
-          assert(dref.port_idx < d_node.expr_roots.size());
-          emit_expr_rec(d_node.expr_graph, d_node.expr_roots[dref.port_idx], "", os);
+        if (data_name.empty()) { // handle convert
+          assert(data_ref.port_idx < data_node.expr_roots.size());
+          emit_expr_rec(data_node.expr_graph, data_node.expr_roots[data_ref.port_idx], "", os);
         } else {
-          os << d_name;
+          os << data_name;
         }
         os << ")";
       }
@@ -187,26 +188,46 @@ namespace abys::ir {
   }
 
   void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) const {
+    auto edge_to_string = [](EdgeKind edge) -> const char * {
+      switch (edge) {
+      case EdgeKind::kPosedge:
+        return "posedge";
+      case EdgeKind::kNegedge:
+        return "negedge";
+      case EdgeKind::kBothEdges:
+        return "edge";
+      case EdgeKind::kNone:
+      default:
+        throw std::logic_error("Invalid edge kind for sequential emission");
+      }
+    };
     for (const auto &node : module.nodes) {
       if (node.kind != Module::NodeKind::kFf) {
         continue;
       }
-      assert(node.inputs.size() == 2);
+      assert(node.inputs.size() == 2 || node.inputs.size() == 3);
       assert(node.outputs.size() == 1);
-      const auto &dref = node.inputs[0];
-      const auto &d_node = module.nodes[dref.node_id];
-      const std::string d_name = d_node.outputs[dref.port_idx].name;
-      const auto &clkref = node.inputs[1];
-      const auto &clk_node = module.nodes[clkref.node_id];
-      const std::string clk_name = clk_node.outputs[clkref.port_idx].name;
+      const auto &data_ref = node.inputs[0];
+      const auto &data_node = module.nodes[data_ref.node_id];
+      const std::string data_name = data_node.outputs[data_ref.port_idx].name;
+      const auto &clk_ref = node.inputs[1];
+      const auto &clk_node = module.nodes[clk_ref.node_id];
+      const std::string clk_name = clk_node.outputs[clk_ref.port_idx].name;
       // TODO: bothedge
-      os << "  always @(posedge " << clk_name << ") begin\n";
-      if (d_name.empty()) {
-        if (d_node.kind == Module::NodeKind::kOp) {
-          assert(dref.port_idx < d_node.expr_roots.size());
-          emit_expr("    " + node.outputs[0].name, true, d_node.expr_graph, d_node.expr_roots[dref.port_idx], os);
-        } else if (d_node.kind == Module::NodeKind::kMerge) {
-          for (const auto &input : d_node.inputs) {
+      os << "  always @(" << edge_to_string(node.clk_edge) << " " << clk_name;
+      if (node.inputs.size() == 3) {
+        const auto &rst_ref = node.inputs[2];
+        const auto &rst_node = module.nodes[rst_ref.node_id];
+        const std::string rst_name = rst_node.outputs[rst_ref.port_idx].name;
+        os << " or " << edge_to_string(node.rst_edge) << " " << rst_name;
+      }
+      os << ") begin\n";
+      if (data_name.empty()) {
+        if (data_node.kind == Module::NodeKind::kOp) {
+          assert(data_ref.port_idx < data_node.expr_roots.size());
+          emit_expr("    " + node.outputs[0].name, true, data_node.expr_graph, data_node.expr_roots[data_ref.port_idx], os);
+        } else if (data_node.kind == Module::NodeKind::kMerge) {
+          for (const auto &input : data_node.inputs) {
             const auto &input_node = module.nodes[input.node_id];
             assert(input.node_id < module.nodes.size());
             assert(input_node.kind == Module::NodeKind::kOp);
@@ -215,7 +236,7 @@ namespace abys::ir {
           }
         }
       } else {
-        os << "    " << node.outputs[0].name << " <= " << d_name << ";\n";
+        os << "    " << node.outputs[0].name << " <= " << data_name << ";\n";
       }
       os << "  end\n";
     }
@@ -245,8 +266,10 @@ namespace abys::ir {
     std::ostringstream ss;
     ss << "[";
     emit_expr_rec(expr_graph, base, "", ss);
-    ss << " +: ";
-    emit_expr_rec(expr_graph, slice_width, "", ss);
+    if (slice_width != expr_graph.constant_one) {
+      ss << " +: ";
+      emit_expr_rec(expr_graph, slice_width, "", ss);
+    }
     ss << "]";
     std::string new_lhs = std::string(lhs) + ss.str();
     emit_expr(new_lhs, false, expr_graph, next, os); // turn off nonblocking to permit cascaded masked assigns

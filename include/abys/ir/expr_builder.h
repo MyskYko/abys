@@ -37,6 +37,9 @@ namespace abys::ir {
 
     ExprId create_unary_plus(ExprId a); // nop
     ExprId create_unary_minus(ExprId a);
+
+    ExprId create_logical_and(ExprId a, ExprId b);
+    ExprId create_logical_or(ExprId a, ExprId b);
     
     ExprId create_add(ExprId a, ExprId b);
     ExprId create_sub(ExprId a, ExprId b);
@@ -96,6 +99,9 @@ namespace abys::ir {
     ExprId get_current_value(std::string_view name) const;
     void update_value(std::string name, ExprId id);
 
+    void get_input_spec(ExprId id, ExprId &input_id, std::string &name, SignalWidth &width, bool &sign) const;
+    bool check_dependency(ExprId id, ExprId target) const;
+
   private:
     ExprGraph &graph_;
     abys::util::StringMap<ExprId> name_map_;
@@ -105,6 +111,7 @@ namespace abys::ir {
     ExprId create_unary_reduce(ExprGraph::Op op, ExprId operand);
     ExprId create_unary(ExprGraph::Op op, ExprId operand);
     ExprId create_nary(ExprGraph::Op op, std::vector<ExprId> operands);
+    ExprId create_logical_binary(ExprGraph::Op op, ExprId a, ExprId b);
     ExprId create_binary(ExprGraph::Op op, ExprId a, ExprId b);
     ExprId create_shift(ExprGraph::Op op, ExprId data, ExprId shamt);
     ExprId create_compare(ExprGraph::Op op, ExprId a, ExprId b);
