@@ -45,6 +45,7 @@ namespace abys::ir {
     ExprId create_sub(ExprId a, ExprId b);
     ExprId create_mul(ExprId a, ExprId b);
     ExprId create_div(ExprId a, ExprId b);
+    ExprId create_pow(ExprId a, ExprId b);
   
     ExprId create_shl(ExprId data, ExprId shamt);
     ExprId create_shr(ExprId data, ExprId shamt);
@@ -101,6 +102,8 @@ namespace abys::ir {
 
     void get_input_spec(ExprId id, ExprId &input_id, std::string &name, SignalWidth &width, bool &sign) const;
     bool check_dependency(ExprId id, ExprId target) const;
+
+    int evaluate(ExprId id) const;
 
   private:
     ExprGraph &graph_;

@@ -1,6 +1,7 @@
 #include <cassert>
 #include <algorithm>
 #include <bitset>
+#include <cmath>
 #include <stdexcept>
 
 #include "abys/ir/expr_builder.h"
@@ -204,6 +205,9 @@ namespace abys::ir {
   }
   ExprId ExprBuilder::create_div(ExprId a, ExprId b) {
     return create_binary(ExprGraph::Op::kDiv, a, b);
+  }
+  ExprId ExprBuilder::create_pow(ExprId a, ExprId b) {
+    return create_binary(ExprGraph::Op::kPow, a, b);
   }
   
   ExprId ExprBuilder::create_shift(ExprGraph::Op op, ExprId data, ExprId shamt) {
@@ -562,6 +566,136 @@ namespace abys::ir {
       }
     }
     return false;
+  }
+
+  int ExprBuilder::evaluate(ExprId id) const {
+    assert(id != kInvalidExprId);
+    const auto &node = graph_.nodes[id];
+    switch (node.op) {
+    case ExprGraph::Op::kUnknown:
+      assert(0);
+      break;
+    case ExprGraph::Op::kConst: {
+      for (const auto &c : graph_.constants) {
+        if (c.id != id) {
+          continue;
+        }
+        const std::string &s = c.value;
+        auto pos = s.find('\'');
+        assert(pos != std::string::npos);
+        assert(s[pos + 1] == 's' || s[pos + 1] == 'b');
+        if (s[pos + 1] == 's') {
+          pos++;
+        }
+        assert(s[pos + 1] == 'b');
+        pos += 2;
+        const std::string digits = s.substr(pos);
+        int value = 0;
+        for (char ch : digits) {
+          assert(ch == '0' || ch == '1');
+          value = (value << 1) | (ch - '0');
+        }
+        return value;
+      }
+      assert(0);
+      break;
+    }
+    case ExprGraph::Op::kInput:
+      assert(0);
+      break;
+    case ExprGraph::Op::kLogicalNot:
+      return !evaluate(node.operands[0]);
+    case ExprGraph::Op::kAndReduce: {
+      const ExprId op_id = node.operands[0];
+      const auto &op_node = graph_.nodes[op_id];
+      int opr = evaluate(op_id);
+      for (SignalWidth i = 0; i < op_node.width; i++) {
+        if (((opr >> i) & 1) == 0) {
+          return 0;
+        }
+      }
+      return 1;
+    }
+    case ExprGraph::Op::kOrReduce: {
+      const ExprId op_id = node.operands[0];
+      const auto &op_node = graph_.nodes[op_id];
+      int opr = evaluate(op_id);
+      for (SignalWidth i = 0; i < op_node.width; i++) {
+        if ((opr >> i) & 1) {
+          return 1;
+        }
+      }
+      return 0;
+    }
+    case ExprGraph::Op::kXorReduce: {
+      const ExprId op_id = node.operands[0];
+      const auto &op_node = graph_.nodes[op_id];
+      int opr = evaluate(op_id);
+      int value = 0;
+      for (SignalWidth i = 0; i < op_node.width; i++) {
+        value ^= (opr >> i) & 1;
+      }
+      return value;
+    }
+    case ExprGraph::Op::kBitwiseNot:
+      return ~evaluate(node.operands[0]);
+    case ExprGraph::Op::kAnd:
+      return evaluate(node.operands[0]) & evaluate(node.operands[1]);
+    case ExprGraph::Op::kOr:
+      return evaluate(node.operands[0]) | evaluate(node.operands[1]);
+    case ExprGraph::Op::kXor:
+      return evaluate(node.operands[0]) ^ evaluate(node.operands[1]);
+    case ExprGraph::Op::kUnaryMinus:
+      return -evaluate(node.operands[0]);
+    case ExprGraph::Op::kAdd:
+      return evaluate(node.operands[0]) + evaluate(node.operands[1]);
+    case ExprGraph::Op::kSub:
+      return evaluate(node.operands[0]) - evaluate(node.operands[1]);
+    case ExprGraph::Op::kMul:
+      return evaluate(node.operands[0]) * evaluate(node.operands[1]);
+    case ExprGraph::Op::kDiv: // TODO: handle unsynthesizable if not constant
+      return evaluate(node.operands[0]) / evaluate(node.operands[1]);
+    case ExprGraph::Op::kPow: // TODO: handle unsynthesizable if not constant
+      return std::pow(evaluate(node.operands[0]), evaluate(node.operands[1]));
+    case ExprGraph::Op::kShl:
+      return evaluate(node.operands[0]) << evaluate(node.operands[1]);
+    case ExprGraph::Op::kShr:
+      return evaluate(node.operands[0]) >> evaluate(node.operands[1]);
+    case ExprGraph::Op::kAshr: {
+      int value = evaluate(node.operands[0]);
+      int shamt = evaluate(node.operands[1]);
+      int mask = value & (1 << (node.width - 1));
+      for (int i = 0; i < shamt; i++) {
+        value = (value >> 1) | mask;
+      }
+      return value;
+    }
+    case ExprGraph::Op::kEq:
+      return evaluate(node.operands[0]) == evaluate(node.operands[1]);
+    case ExprGraph::Op::kLt:
+      return evaluate(node.operands[0]) < evaluate(node.operands[1]);
+    case ExprGraph::Op::kLe:
+      return evaluate(node.operands[0]) <= evaluate(node.operands[1]);
+    case ExprGraph::Op::kMux:
+      return evaluate(node.operands[0]) ? evaluate(node.operands[1]) : evaluate(node.operands[2]);
+    case ExprGraph::Op::kList:
+    case ExprGraph::Op::kCase:
+      assert(0);
+      break;
+    case ExprGraph::Op::kConvert:
+      return evaluate(node.operands[0]);
+    case ExprGraph::Op::kConcat:
+    case ExprGraph::Op::kGather:
+    case ExprGraph::Op::kMaskedAssign:
+    case ExprGraph::Op::kReverse:
+    case ExprGraph::Op::kRange:
+    case ExprGraph::Op::kArraySelect:
+    case ExprGraph::Op::kBothEdge:
+    case ExprGraph::Op::kCall:
+      assert(0);
+      break;
+    }
+    return -1;
   }
   
 } // namespace abys::ir

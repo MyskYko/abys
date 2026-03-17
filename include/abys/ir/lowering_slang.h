@@ -6,6 +6,7 @@
 #include <typeinfo>
 #include <unordered_map>
 #include <vector>
+#include <iostream>
 
 #include "slang/ast/Compilation.h"
 #include "slang/ast/SemanticFacts.h"
@@ -123,6 +124,16 @@ namespace abys::ir {
       expr_stack_.push_back(id);
     }
 
+    void handle(const slang::ast::StringLiteral &expr) {
+      const auto cv = expr.getConstant();
+      if (!cv || !*cv || !cv->isInteger()) {
+        throw std::logic_error("String literal did not lower to integer constant");
+      }
+      const slang::SVInt v = cv->integer();
+      ExprId id = builder_.find_or_create_const(v.toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr));
+      expr_stack_.push_back(id);
+    }
+
     void handle(const slang::ast::UnbasedUnsizedIntegerLiteral &expr) {
       const slang::SVInt v = expr.getValue();
       ExprId id = builder_.find_or_create_const(v.toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr));
@@ -130,6 +141,7 @@ namespace abys::ir {
     }
 
     void handle(const slang::ast::CallExpression &expr) {
+      // TODO: it seems some parameters do not get evaluated as a constant, so remembering system call may be necessary as well, then cv stuff may not be needed any longer
       const auto cv = expr.getConstant();
       if (cv && *cv && cv->isInteger()) {
         const slang::SVInt v = cv->integer();
@@ -300,6 +312,9 @@ namespace abys::ir {
         break;
       case slang::ast::BinaryOperator::Divide:
         id = builder_.create_div(lhs, rhs);
+        break;
+      case slang::ast::BinaryOperator::Power:
+        id = builder_.create_pow(lhs, rhs);
         break;
       case slang::ast::BinaryOperator::LogicalShiftLeft:
       case slang::ast::BinaryOperator::ArithmeticShiftLeft:
@@ -533,6 +548,14 @@ namespace abys::ir {
     }
     
     void handle(const slang::ast::ExpressionStatement &stmt) {
+      if (stmt.expr.kind == slang::ast::ExpressionKind::Call) {
+        const auto &call = stmt.expr.as<slang::ast::CallExpression>();
+        if (call.isSystemCall()) {
+          // TODO: create warning standard in this repo
+          std::cerr << "warning: ignoring system task call in synthesis lowering: " << call.getSubroutineName() << "\n";
+          return;
+        }
+      }
       if (stmt.expr.kind != slang::ast::ExpressionKind::Assignment) {
 	throw std::logic_error("Non-assignment expression statement is unsupported");
       }
@@ -606,6 +629,80 @@ namespace abys::ir {
       }
       builder_.stack_context();
       builder_.merge_case(case_id, case_values, index);
+    }
+
+    void handle(const slang::ast::ForLoopStatement& stmt) {
+      if (!stmt.loopVars.empty()) {
+        builder_.create_context();
+        for (auto var : stmt.loopVars) {
+          const std::string name(var->name);
+          builder_.add_local_variable(name);
+          if (const auto *init = var->getInitializer()) {
+            ExprId expr_id = build_expr(*init, builder_.get_expr_builder());
+            builder_.get_expr_builder().update_value(name, expr_id);
+            builder_.output_names().push_back(name);
+            builder_.output_nonblocking().push_back(false);
+            builder_.output_ids().push_back(expr_id);
+          }
+        }
+      }
+      for (auto init : stmt.initializers) {
+        if (!init) {
+          continue;
+        }
+        if (init->kind != slang::ast::ExpressionKind::Assignment) {
+          throw std::logic_error("unsupported for-loop initializer");
+        }
+        const auto &assign = init->as<slang::ast::AssignmentExpression>();
+        if (assign.isCompound()) {
+          throw std::logic_error("compound for-loop initializer is unsupported");
+        }
+        assert(!assign.isNonBlocking());
+        ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder());
+        const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
+        lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), [&](const std::string &output_name, ExprId expr_id) {
+          builder_.get_expr_builder().update_value(output_name, expr_id);
+          builder_.output_names().push_back(output_name);
+          builder_.output_nonblocking().push_back(false);
+          builder_.output_ids().push_back(expr_id);
+        });
+      }
+      for (size_t iter = 0; ; iter++) {
+        // TODO: warn if this iterates too many times
+        if (!stmt.stopExpr) {
+          // TODO: handle break/continue
+          throw std::logic_error("for-loop without stop condition is unsupported");
+        }
+        ExprId stop_id = build_expr(*stmt.stopExpr, builder_.get_expr_builder());
+        if (!builder_.get_expr_builder().evaluate(stop_id)) {
+          break;
+        }
+        stmt.body.visit(*this);
+        for (auto step : stmt.steps) {
+          if (!step) {
+            continue;
+          }
+          if (step->kind != slang::ast::ExpressionKind::Assignment) {
+            throw std::logic_error("unsupported for-loop step");
+          }
+          const auto &assign = step->as<slang::ast::AssignmentExpression>();
+          if (assign.isCompound()) {
+            throw std::logic_error("compound is unsupported");
+          }
+          assert(!assign.isNonBlocking());
+          ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder());
+          const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
+          lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), [&](const std::string &output_name, ExprId expr_id) {
+            builder_.get_expr_builder().update_value(output_name, expr_id);
+            builder_.output_names().push_back(output_name);
+            builder_.output_nonblocking().push_back(false);
+            builder_.output_ids().push_back(expr_id);
+          });
+        }
+      }
+      if (!stmt.loopVars.empty()) {
+        builder_.merge_context();
+      }
     }
     
     void handle(const slang::ast::StatementList &stmt) {
@@ -779,6 +876,7 @@ namespace abys::ir {
       const ExprId expr_id = build_expr(*init, expr_builder);
       builder_.add_node_output_expr(module_id, node_id, std::string(symbol.name), expr_id, true);
       create_variable(symbol, false);
+      // TODO: probably we want parameters directly assigned as a constant, by passing a list to expr builder
     }
     
     void handle(const slang::ast::PortSymbol &symbol) {
@@ -850,8 +948,8 @@ namespace abys::ir {
 	  assert(port.direction != slang::ast::ArgumentDirection::InOut);
 	  assert(port.direction != slang::ast::ArgumentDirection::Ref);
 	  const slang::ast::Expression *expr = conn->getExpression();
-	  assert(expr);
 	  if (port.direction == slang::ast::ArgumentDirection::In) {
+            assert(expr);
 	    if (expr->kind != slang::ast::ExpressionKind::NamedValue) {
 	      const NodeId input_id = create_expr_node(*expr);
 	      builder_.add_node_input(module_id, node_id, input_id);
@@ -861,6 +959,10 @@ namespace abys::ir {
                                            expr_width(*expr), expr_sign(*expr));
 	    }
 	  } else if (port.direction == slang::ast::ArgumentDirection::Out) {
+            if (!expr) {
+              builder_.add_node_output(module_id, node_id, "", 0, false);
+              continue;
+            }
             assert(expr->kind == slang::ast::ExpressionKind::Assignment);
             const auto &assign = expr->as<slang::ast::AssignmentExpression>();
             assert(assign.right().kind == slang::ast::ExpressionKind::EmptyArgument);
@@ -930,6 +1032,18 @@ namespace abys::ir {
     
     void handle(const slang::ast::NetSymbol &symbol) {
       create_variable(symbol, true);
+      const auto *init = symbol.getInitializer();
+      if (!init) {
+        return;
+      }
+      const ModuleId module_id = current_module_id();
+      const NodeId node_id = builder_.create_operation(module_id);
+      ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
+      ExprId rhs_id = build_expr(*init, expr_builder);
+      expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
+        builder_.add_node_input_spec(module_id, node_id, name, width, sign);
+      });
+      builder_.add_node_output_expr(module_id, node_id, std::string(symbol.name), rhs_id, true);
     }
     
     void handle(const slang::ast::ProceduralBlockSymbol &symbol) {
@@ -957,6 +1071,7 @@ namespace abys::ir {
       stmt_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
         builder_.add_node_input_spec(module_id, node_id, name, width, sign);
       });
+      // TODO: skip integers to be assigned (what else should we skip?)
       if(!stmt_builder.is_ff()) {
         // TODO: latch inference is deferred
         stmt_builder.for_each_output([&](const std::string &name, ExprId expr_id) {

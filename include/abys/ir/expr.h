@@ -25,7 +25,8 @@ namespace abys::ir {
       kAdd,
       kSub,
       kMul,
-      kDiv, // TODO: do we really want this? can we just evaluate them to constant?
+      kDiv, // TODO: handle unsynthesizable if not constant
+      kPow, // TODO: handle unsynthesizable if not constant
       kShl,
       kShr,
       kAshr,

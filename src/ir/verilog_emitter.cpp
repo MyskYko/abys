@@ -349,6 +349,9 @@ namespace abys::ir {
     case ExprGraph::Op::kDiv:
       emit_bin("/");
       return;
+    case ExprGraph::Op::kPow:
+      emit_bin("**");
+      return;
     case ExprGraph::Op::kShl:
       emit_bin("<<");
       return;
