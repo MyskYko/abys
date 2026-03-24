@@ -220,6 +220,8 @@ namespace abys::ir {
       ExprId current_id = expr_builder.get_current_value(entry.first);
       bool is_first = true;
       bool nonblocking;
+      case_output_ids[entry.second].resize(context_stack_.size() - stack_index, kInvalidExprId);
+      case_output_nonblocking[entry.second].resize(context_stack_.size() - stack_index, false);
       for (size_t j = 0; j < case_output_ids[entry.second].size(); j++) {
 	if (case_output_ids[entry.second][j] != kInvalidExprId) {
 	  if (is_first) {

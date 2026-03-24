@@ -508,12 +508,12 @@ namespace abys::ir {
   }
   
   ExprId ExprBuilder::create_array_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb, SignalWidth width, bool sign) {
+    const ExprId pos = normalize_index_expr(index, msb, lsb);
     const ExprId id = create_node();
     auto &node = get_node(id);
     node.op = ExprGraph::Op::kArraySelect;
     node.width = width;
     node.sign = sign;
-    const ExprId pos = normalize_index_expr(index, msb, lsb);
     node.operands = {data, pos};
     return id;
   }
