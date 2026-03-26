@@ -26,6 +26,7 @@ namespace abys::ir {
       kSub,
       kMul,
       kDiv, // TODO: handle unsynthesizable if not constant
+      kMod, // TODO: handle unsynthesizable if not constant
       kPow, // TODO: handle unsynthesizable if not constant
       kShl,
       kShr,

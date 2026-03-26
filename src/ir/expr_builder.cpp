@@ -206,6 +206,9 @@ namespace abys::ir {
   ExprId ExprBuilder::create_div(ExprId a, ExprId b) {
     return create_binary(ExprGraph::Op::kDiv, a, b);
   }
+  ExprId ExprBuilder::create_mod(ExprId a, ExprId b) {
+    return create_binary(ExprGraph::Op::kMod, a, b);
+  }
   ExprId ExprBuilder::create_pow(ExprId a, ExprId b) {
     return create_binary(ExprGraph::Op::kPow, a, b);
   }
@@ -655,6 +658,8 @@ namespace abys::ir {
       return evaluate(node.operands[0]) * evaluate(node.operands[1]);
     case ExprGraph::Op::kDiv: // TODO: handle unsynthesizable if not constant
       return evaluate(node.operands[0]) / evaluate(node.operands[1]);
+    case ExprGraph::Op::kMod: // TODO: handle unsynthesizable if not constant
+      return evaluate(node.operands[0]) % evaluate(node.operands[1]);
     case ExprGraph::Op::kPow: // TODO: handle unsynthesizable if not constant
       return std::pow(evaluate(node.operands[0]), evaluate(node.operands[1]));
     case ExprGraph::Op::kShl:

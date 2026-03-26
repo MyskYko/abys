@@ -45,6 +45,7 @@ namespace abys::ir {
     ExprId create_sub(ExprId a, ExprId b);
     ExprId create_mul(ExprId a, ExprId b);
     ExprId create_div(ExprId a, ExprId b);
+    ExprId create_mod(ExprId a, ExprId b);
     ExprId create_pow(ExprId a, ExprId b);
   
     ExprId create_shl(ExprId data, ExprId shamt);

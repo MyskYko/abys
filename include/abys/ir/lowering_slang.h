@@ -313,6 +313,9 @@ namespace abys::ir {
       case slang::ast::BinaryOperator::Divide:
         id = builder_.create_div(lhs, rhs);
         break;
+      case slang::ast::BinaryOperator::Mod:
+        id = builder_.create_mod(lhs, rhs);
+        break;
       case slang::ast::BinaryOperator::Power:
         id = builder_.create_pow(lhs, rhs);
         break;
