@@ -1099,7 +1099,8 @@ namespace abys::ir {
 
     void handle(const slang::ast::SubroutineSymbol &symbol) {
       if (symbol.subroutineKind != slang::ast::SubroutineKind::Function) {
-        throw std::logic_error("Task lowering not supported: " + std::string(symbol.name));
+        std::cerr << "warning: ignoring task in synthesis lowering: " << symbol.name << "\n";
+        return;
       }
       // TODO: it is better to remove dependency on tig structure; use builder api to create a subroutine
       Tig::Subroutine subr;

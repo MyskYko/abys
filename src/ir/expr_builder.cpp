@@ -53,13 +53,13 @@ namespace abys::ir {
   ExprId ExprBuilder::find_or_create_const(std::string value, SignalWidth width, bool sign) {
     if (width == 1 && sign == false) {
       if (value == "1'b0") {
-      return graph_.constant_zero;
+        return graph_.constant_zero;
       }
       if (value == "1'b1") {
         return graph_.constant_one;
       }
-      assert(false);
     }
+    // TODO: x and z fall through; verify it works with other parts
     const ExprId id = create_node();
     graph_.constants.emplace_back(ExprGraph::Constant{id, std::move(value)});
     auto &node = get_node(id);
