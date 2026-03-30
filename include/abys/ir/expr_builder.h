@@ -52,6 +52,8 @@ namespace abys::ir {
     ExprId create_shr(ExprId data, ExprId shamt);
     ExprId create_ashr(ExprId data, ExprId shamt);
 
+    ExprId create_preinc(ExprId operand);
+    
     ExprId create_eq(ExprId a, ExprId b);
     ExprId create_neq(ExprId a, ExprId b); // map to logical_not(eq)
     ExprId create_lt(ExprId a, ExprId b);

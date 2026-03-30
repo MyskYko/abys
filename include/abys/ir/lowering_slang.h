@@ -384,16 +384,27 @@ namespace abys::ir {
         id = builder_.create_or_reduce(a);
         break;
       case slang::ast::UnaryOperator::BitwiseXor:
-        id = builder_.create_xor_reduce(a); // TODO: xnor reduce if needed
+        id = builder_.create_xor_reduce(a);
         break;
       case slang::ast::UnaryOperator::BitwiseNand:
+        id = builder_.create_and_reduce(a);
+        id = builder_.create_logical_not(id);
+        break;
       case slang::ast::UnaryOperator::BitwiseNor:
+        id = builder_.create_or_reduce(a);
+        id = builder_.create_logical_not(id);
+        break;
       case slang::ast::UnaryOperator::BitwiseXnor:
+        id = builder_.create_xor_reduce(a);
+        id = builder_.create_logical_not(id);
+        break;
       case slang::ast::UnaryOperator::Preincrement:
+        id = builder_.create_preinc(a);
+        break;
       case slang::ast::UnaryOperator::Predecrement:
       case slang::ast::UnaryOperator::Postincrement:
       case slang::ast::UnaryOperator::Postdecrement:
-        throw std::logic_error("Notop/inc/dec unary operators are not supported");
+        throw std::logic_error("inc/dec unary operators are not yet supported");
       }
       assert(id != kInvalidExprId);
       expr_stack_.push_back(id);
@@ -535,6 +546,10 @@ namespace abys::ir {
       throw std::logic_error(
                              std::string("Unhandled AST node: ") + typeid(T).name()
                              );
+    }
+
+    void handle(const slang::ast::EmptyStatement &) {
+      return;
     }
 
     void handle(const slang::ast::VariableDeclStatement &stmt) {

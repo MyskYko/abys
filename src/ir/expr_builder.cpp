@@ -79,12 +79,17 @@ namespace abys::ir {
       assert(index != std::numeric_limits<BitIndex>::min());
       index = -index;
     }
-    std::bitset<SignalWidthBitSize> bits(index);
-    std::string str = bits.to_string();
-    size_t pos = str.find_first_not_of('0');
-    assert(pos != std::string::npos);
-    str.erase(0, pos);
-    const ExprId id = find_or_create_const(std::to_string(str.length()) + "'b" + str, str.length(), false);
+    ExprId id;
+    if (index == 1) {
+      id = get_constant_one();
+    } else {
+      std::bitset<SignalWidthBitSize> bits(index);
+      std::string str = bits.to_string();
+      size_t pos = str.find_first_not_of('0');
+      assert(pos != std::string::npos);
+      str.erase(0, pos);
+      id = find_or_create_const(std::to_string(str.length()) + "'b" + str, str.length(), false);
+    }
     if (negative) {
       return create_unary_minus(id);
     }
@@ -124,6 +129,7 @@ namespace abys::ir {
     return id;
   }
   ExprId ExprBuilder::create_bitwise_not(ExprId operand) {
+    // TODO: is sign correct?
     return create_unary(ExprGraph::Op::kBitwiseNot, operand);
   }
   
@@ -231,6 +237,54 @@ namespace abys::ir {
   }
   ExprId ExprBuilder::create_ashr(ExprId data, ExprId shamt) {
     return create_shift(ExprGraph::Op::kAshr, data, shamt);
+  }
+
+  ExprId ExprBuilder::create_preinc(ExprId operand) {
+    abort(); // TODO: this block is untested
+    std::string name;
+    bool found = false;
+    for (const auto &kv : name_map_) {
+      if (kv.second == operand) {
+        name = kv.first;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      throw std::logic_error("preincrement requires current mapped lvalue");
+    }
+    // TODO: not sure about bitwidth and signedness
+    const ExprId next = create_add(operand, get_constant_one());
+    ExprId updated = next;
+    ExprId cursor = operand;
+    while (true) {
+      const auto &node = get_node(cursor);
+      if (node.op == ExprGraph::Op::kArraySelect) {
+        ExprId base = node.operands[0];
+        ExprId index = node.operands[1];
+        const auto &base_node = get_node(base);
+        updated = create_masked_assign(base, updated, index, get_constant_one(), base_node.width, base_node.sign);
+        cursor = base;
+        continue;
+      }
+      if (node.op == ExprGraph::Op::kRange) {
+        ExprId base = node.operands[0];
+        ExprId pos = node.operands[1];
+        const auto &base_node = get_node(base);
+        updated = create_masked_assign(base, updated, pos, find_or_create_const(node.width), base_node.width, base_node.sign);
+        cursor = base;
+        continue;
+      }
+      if (node.op == ExprGraph::Op::kReverse) {
+        assert(node.operands.size() == 1);
+        updated = create_reverse(updated);
+        cursor = node.operands[0];
+        continue;
+      }
+      break;
+    }
+    update_value(name, updated);
+    return next;
   }
 
   ExprId ExprBuilder::create_compare(ExprGraph::Op op, ExprId a, ExprId b) {
@@ -373,6 +427,7 @@ namespace abys::ir {
     return lsb - index;
   }
   ExprId ExprBuilder::normalize_index_expr(ExprId index, BitIndex msb, BitIndex lsb) {
+    // TODO: not sure about bitwidth and signedness
     if (lsb == 0 && msb >= lsb) {
       return index;
     }
@@ -420,6 +475,7 @@ namespace abys::ir {
     if (dir) {
       assert(width > 0);
       assert(width <= static_cast<SignalWidth>(std::numeric_limits<BitIndex>::max()));
+      // TODO: not sure about bitwidth and signedness
       const ExprId offset = find_or_create_const(width - 1);
       left = create_add(base, offset);
     }
@@ -480,6 +536,7 @@ namespace abys::ir {
     if (dir) {
       data = create_reverse(data);
       assert(slice_width > 0);
+      // TODO: not sure about bitwidth and signedness
       const ExprId offset = find_or_create_const(slice_width - 1);
       left = create_add(base, offset);
     }
