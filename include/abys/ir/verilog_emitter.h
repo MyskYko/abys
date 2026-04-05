@@ -27,7 +27,7 @@ namespace abys::ir {
     void emit_output_binds(const Module &module, std::ostream &os) const;
     void emit_module_footer(std::ostream &os) const;
 
-    void emit_expr(std::string_view lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id, std::ostream &os) const;
+    void emit_expr(std::string_view lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id, std::ostream &os, std::string_view indent) const;
     void emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::string_view lhs, std::ostream &os) const;
   };
 

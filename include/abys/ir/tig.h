@@ -36,6 +36,7 @@ namespace abys::ir {
 	kPo,
 	kOp,
         kMerge,
+        kFfMerge,
 	kFf,
 	kLatch,
 	kMemory,

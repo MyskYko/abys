@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
+#include <algorithm>
 
 #include "abys/ir/tig_builder.h"
 #include "abys/ir/expr_builder.h"
@@ -124,6 +125,11 @@ namespace abys::ir {
     return node_id;
   }
 
+  TigBuilder::NodeId TigBuilder::create_ff_merge(ModuleId module_id) {
+    NodeId node_id = create_node(module_id, NodeKind::kFfMerge);
+    return node_id;
+  }
+
   void TigBuilder::record_ff(ModuleId module_id, std::string name, SignalSpec clk_spec, EdgeKind clk_edge, SignalSpec rst_spec, EdgeKind rst_edge, NodeId node_id, PortIndex port_idx) {
     assert(!clk_spec.name.empty());
     design_.modules[module_id].pending_ffs.emplace_back(Tig::Module::PendingFf{std::move(name), std::move(clk_spec), clk_edge, std::move(rst_spec), rst_edge, node_id, port_idx});
@@ -211,59 +217,117 @@ namespace abys::ir {
   }
 
   void TigBuilder::insert_ffs(ModuleId module_id) {
+    auto same_ff_props = [](const Tig::Module::PendingFf &a, const Tig::Module::PendingFf &b) {
+      if (a.clk_spec.name != b.clk_spec.name ||
+          a.clk_spec.width != b.clk_spec.width ||
+          a.clk_spec.sign != b.clk_spec.sign ||
+          a.clk_edge != b.clk_edge) {
+        return false;
+      }
+      const bool a_has_rst = !a.rst_spec.name.empty();
+      const bool b_has_rst = !b.rst_spec.name.empty();
+      if (a_has_rst != b_has_rst) {
+        return false;
+      }
+      if (!a_has_rst) {
+        return true;
+      }
+      if (a.rst_spec.name != b.rst_spec.name ||
+          a.rst_spec.width != b.rst_spec.width ||
+          a.rst_spec.sign != b.rst_spec.sign ||
+          a.rst_edge != b.rst_edge) {
+        return false;
+      }
+      return true;
+    };
+
     auto &module = design_.modules[module_id];
-    for (const auto &kv : module.pending_ffs) {
-      // name of ff, clk spec, data node, data port index
-      auto it = module.signal_map.find(kv.name);
-      if (it == module.signal_map.end()) {
-        throw std::logic_error("insert_ffs: signal not found: " + kv.name);
-      }
-      Node &old_node = module.nodes[it->second.node_id];
-      if (old_node.kind == NodeKind::kFf) {
-        assert(input_specs[module_id][it->second.node_id].size() == 2 || input_specs[module_id][it->second.node_id].size() == 3);
-        const SignalSpec clk_spec_old = input_specs[module_id][it->second.node_id][1];
-        if (kv.clk_spec.name != clk_spec_old.name ||
-            kv.clk_spec.width != clk_spec_old.width ||
-            kv.clk_spec.sign != clk_spec_old.sign ||
-            kv.clk_edge != old_node.clk_edge) {
-          // TODO: create another ff
-          throw std::logic_error("Different FF clocks for signal: " + kv.name);
-        }
-        if (!kv.rst_spec.name.empty()) {
-          if (input_specs[module_id][it->second.node_id].size() != 3) {
-            // TODO: create another ff
-            throw std::logic_error("Different FF reset usage for signal: " + kv.name);
-          }
-          const SignalSpec rst_spec_old = input_specs[module_id][it->second.node_id][2];
-          if (kv.rst_spec.name != rst_spec_old.name ||
-              kv.rst_spec.width != rst_spec_old.width ||
-              kv.rst_spec.sign != rst_spec_old.sign ||
-              kv.rst_edge != old_node.rst_edge) {
-            // TODO: create another ff
-            throw std::logic_error("Different FF resets for signal: " + kv.name);
-          }
-        } else if (input_specs[module_id][it->second.node_id].size() == 3) {
-          // TODO: create another ff
-          throw std::logic_error("Different FF reset usage for signal: " + kv.name);
-        }
-        continue;
-      }
-      assert(old_node.kind == NodeKind::kOp || old_node.kind == NodeKind::kMerge);
-      old_node.outputs[it->second.port_idx].name.clear();
+    
+    auto create_ff = [&](const PendingFf &pending_ff, const Signal &signal, const SignalSpec &spec, bool named) -> Signal {
       NodeId ff_id = create_node(module_id, NodeKind::kFf);
       Node &ff_node = module.nodes[ff_id];
-      const auto spec = get_signal_spec(module_id, it->second);
-      add_node_input(module_id, ff_id, it->second.node_id, it->second.port_idx);
-      add_node_input_spec(module_id, ff_id, kv.clk_spec.name, kv.clk_spec.width, kv.clk_spec.sign);
-      ff_node.clk_edge = kv.clk_edge;
-      if (!kv.rst_spec.name.empty()) {
-        add_node_input_spec(module_id, ff_id, kv.rst_spec.name, kv.rst_spec.width, kv.rst_spec.sign);
-        ff_node.rst_edge = kv.rst_edge;
+      add_node_input(module_id, ff_id, signal.node_id, signal.port_idx);
+      add_node_input_spec(module_id, ff_id, pending_ff.clk_spec.name, pending_ff.clk_spec.width, pending_ff.clk_spec.sign);
+      ff_node.clk_edge = pending_ff.clk_edge;
+      if (!pending_ff.rst_spec.name.empty()) {
+        add_node_input_spec(module_id, ff_id, pending_ff.rst_spec.name, pending_ff.rst_spec.width, pending_ff.rst_spec.sign);
+        ff_node.rst_edge = pending_ff.rst_edge;
       }
-      ff_node.outputs.emplace_back(kv.name, spec.width, spec.sign);
+      ff_node.outputs.emplace_back(named? pending_ff.name : "", spec.width, spec.sign);
       ff_node.expr_roots.push_back(kInvalidExprId);
       ff_node.combs.push_back(false);
-      it->second = Signal{ff_id, 0};
+      return Signal{ff_id, 0};
+    };
+    
+    auto &pending_ffs = module.pending_ffs;
+    std::sort(pending_ffs.begin(), pending_ffs.end(), [](const PendingFf &a, const PendingFf &b) {
+      return a.name < b.name;
+    });
+    for (size_t begin = 0; begin < pending_ffs.size();) {
+      auto it = module.signal_map.find(pending_ffs[begin].name);
+      if (it == module.signal_map.end()) {
+        throw std::logic_error("insert_ffs: signal not found: " + pending_ffs[begin].name);
+      }
+      const auto spec = get_signal_spec(module_id, it->second);
+      assert(module.nodes[it->second.node_id].kind == NodeKind::kOp ||
+             module.nodes[it->second.node_id].kind == NodeKind::kMerge);
+      module.nodes[it->second.node_id].outputs[it->second.port_idx].name.clear();
+      size_t end = begin + 1;
+      while (end < pending_ffs.size() && pending_ffs[end].name == pending_ffs[begin].name) {
+        end++;
+      }
+      if (begin + 1 == end) {
+        it->second = create_ff(pending_ffs[begin], it->second, spec, true);
+        begin = end;
+        continue;
+      }
+      std::vector<std::vector<size_t>> clusters;
+      for (size_t i = begin; i < end; i++) {
+        bool f = false;
+        for (auto &cluster : clusters) {
+          if (same_ff_props(pending_ffs[i], pending_ffs[cluster.front()])) {
+            cluster.push_back(i);
+            f = true;
+            break;
+          }
+        }
+        if (!f) {
+          clusters.push_back({i});
+        }
+      }
+      if (clusters.size() == 1) {
+        it->second = create_ff(pending_ffs[clusters.front().front()], it->second, spec, true);
+      } else {
+        std::vector<Signal> ffs;
+        for (const auto &cluster : clusters) {
+          Signal signal;
+          if (cluster.size() == 1) {
+            signal = {pending_ffs[cluster.front()].node_id, pending_ffs[cluster.front()].port_idx};
+          } else {
+            NodeId merge_id = create_merge(module_id);
+            Node &merge_node = module.nodes[merge_id];
+            for (size_t i : cluster) {
+              const auto &pending_ff = pending_ffs[i];
+              add_node_input(module_id, merge_id, pending_ff.node_id, pending_ff.port_idx);
+            }
+            merge_node.outputs.emplace_back("", spec.width, spec.sign);
+            merge_node.expr_roots.push_back(kInvalidExprId);
+            merge_node.combs.push_back(false);
+            signal = Signal{merge_id, 0};
+          }
+          ffs.push_back(create_ff(pending_ffs[cluster.front()], signal, spec, false));
+        }
+        NodeId ff_merge_id = create_ff_merge(module_id);
+        Node &ff_merge_node = module.nodes[ff_merge_id];
+        for (const auto &ff : ffs) {
+          add_node_input(module_id, ff_merge_id, ff.node_id, ff.port_idx);
+        }
+        ff_merge_node.outputs.emplace_back(pending_ffs[begin].name, spec.width, spec.sign);
+        ff_merge_node.expr_roots.push_back(kInvalidExprId);
+        ff_merge_node.combs.push_back(false);
+        it->second = Signal{ff_merge_id, 0};
+      }
+      begin = end;
     }
     module.pending_ffs.clear();
   }

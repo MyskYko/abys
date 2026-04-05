@@ -1,6 +1,7 @@
 #include <cassert>
 #include <stdexcept>
 #include <unordered_set>
+#include <map>
 #include <sstream>
 
 #include "abys/ir/verilog_emitter.h"
@@ -165,7 +166,7 @@ namespace abys::ir {
         os << "  always @(*) begin\n";
         for (size_t i = 0; i < node.outputs.size(); i++) {
           if (!node.outputs[i].name.empty()) { // skip convert (already handled above)
-            emit_expr("    " + node.outputs[i].name, false, node.expr_graph, node.expr_roots[i], os);
+            emit_expr(node.outputs[i].name, false, node.expr_graph, node.expr_roots[i], os, "    ");
           }
         }
         os << "  end\n";
@@ -179,7 +180,7 @@ namespace abys::ir {
             assert(input.node_id < module.nodes.size());
             assert(input_node.kind == Module::NodeKind::kOp);
             assert(input.port_idx < input_node.expr_roots.size());
-            emit_expr("    " + name, false, input_node.expr_graph, input_node.expr_roots[input.port_idx], os);
+            emit_expr(name, false, input_node.expr_graph, input_node.expr_roots[input.port_idx], os, "    ");
           }
         }
         os << "  end\n";
@@ -201,12 +202,30 @@ namespace abys::ir {
         throw std::logic_error("Invalid edge kind for sequential emission");
       }
     };
+    std::map<Tig::NodeId, std::string> merged_ffs;
     for (const auto &node : module.nodes) {
+      if (node.kind == Module::NodeKind::kFfMerge) {
+        for (const auto &input : node.inputs) {
+          assert(input.port_idx == 0);
+          merged_ffs[input.node_id] = node.outputs[0].name;
+        }
+      }
+    }
+    for (Tig::NodeId ff_id = 0; ff_id < module.nodes.size(); ff_id++) {
+      const auto &node = module.nodes[ff_id];
       if (node.kind != Module::NodeKind::kFf) {
         continue;
       }
       assert(node.inputs.size() == 2 || node.inputs.size() == 3);
       assert(node.outputs.size() == 1);
+      std::string lhs_name = node.outputs[0].name;
+      if (lhs_name.empty()) {
+        auto it = merged_ffs.find(ff_id);
+        if (it != merged_ffs.end()) {
+          lhs_name = it->second;
+        }
+      }
+      assert(!lhs_name.empty());
       const auto &data_ref = node.inputs[0];
       const auto &data_node = module.nodes[data_ref.node_id];
       const std::string data_name = data_node.outputs[data_ref.port_idx].name;
@@ -225,14 +244,14 @@ namespace abys::ir {
       if (data_name.empty()) {
         if (data_node.kind == Module::NodeKind::kOp) {
           assert(data_ref.port_idx < data_node.expr_roots.size());
-          emit_expr("    " + node.outputs[0].name, true, data_node.expr_graph, data_node.expr_roots[data_ref.port_idx], os);
+          emit_expr(lhs_name, true, data_node.expr_graph, data_node.expr_roots[data_ref.port_idx], os, "    ");
         } else if (data_node.kind == Module::NodeKind::kMerge) {
           for (const auto &input : data_node.inputs) {
             const auto &input_node = module.nodes[input.node_id];
             assert(input.node_id < module.nodes.size());
             assert(input_node.kind == Module::NodeKind::kOp);
             assert(input.port_idx < input_node.expr_roots.size());
-            emit_expr("    " + node.outputs[0].name, true, input_node.expr_graph, input_node.expr_roots[input.port_idx], os);
+            emit_expr(lhs_name, true, input_node.expr_graph, input_node.expr_roots[input.port_idx], os, "    ");
           }
         }
       } else {
@@ -242,37 +261,77 @@ namespace abys::ir {
     }
   }
 
-  void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id, std::ostream &os) const {
+  void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id, std::ostream &os, std::string_view indent) const {
     if (id == kInvalidExprId) {
       return;
     }
     const auto &node = expr_graph.nodes[id];
-    if (node.op != ExprGraph::Op::kMaskedAssign) {
-      os << lhs;
-      if (nonblocking) {
-        os << " <= ";
-      } else {
-        os << " = ";
+    switch (node.op) {
+    case ExprGraph::Op::kMaskedAssign: {
+      const ExprId current = node.operands[0];
+      const ExprId next = node.operands[1];
+      const ExprId base = node.operands[2];
+      const ExprId slice_width = node.operands[3];
+      emit_expr(lhs, false, expr_graph, current, os, indent); // turn off nonblocking to permit cascaded masked assigns
+      std::ostringstream ss;
+      ss << lhs << "[";
+      emit_expr_rec(expr_graph, base, "", ss);
+      if (slice_width != expr_graph.constant_one) {
+        ss << " +: ";
+        emit_expr_rec(expr_graph, slice_width, "", ss);
       }
+      ss << "]";
+      emit_expr(ss.str(), nonblocking && current == kInvalidExprId, expr_graph, next, os, indent);
+      return;
+    }
+    case ExprGraph::Op::kMux:
+      os << indent << "if (";
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+      os << ") begin\n";
+      emit_expr(lhs, nonblocking, expr_graph, node.operands[1], os, std::string(indent) + "  ");
+      os << indent << "end else begin\n";
+      emit_expr(lhs, nonblocking, expr_graph, node.operands[2], os, std::string(indent) + "  ");
+      os << indent << "end\n";
+      return;
+    case ExprGraph::Op::kCase: {
+      assert(!node.operands.empty());
+      os << indent << "case (";
+      emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+      os << ")\n";
+      size_t i = 1;
+      while (i + 1 < node.operands.size()) {
+        os << indent;
+        const auto &value_node = expr_graph.nodes[node.operands[i]];
+        if (value_node.op == ExprGraph::Op::kList) {
+          for (size_t k = 0; k < value_node.operands.size(); k++) {
+            if (k) {
+              os << ", ";
+            }
+            emit_expr_rec(expr_graph, value_node.operands[k], lhs, os);
+          }
+        } else {
+          emit_expr_rec(expr_graph, node.operands[i], lhs, os);
+        }
+        os << ": begin\n";
+        emit_expr(lhs, nonblocking, expr_graph, node.operands[i + 1], os, std::string(indent) + "  ");
+        os << indent << "end\n";
+        i += 2;
+      }
+      if (i < node.operands.size()) {
+        os << indent << "default: begin\n";
+        emit_expr(lhs, nonblocking, expr_graph, node.operands[i], os, std::string(indent) + "  ");
+        os << indent << "end\n";
+      }
+      os << indent << "endcase\n";
+      return;
+    }
+    default:
+      os << indent << lhs;
+      os << (nonblocking ? " <= " : " = ");
       emit_expr_rec(expr_graph, id, lhs, os);
       os << ";\n";
       return;
     }
-    const ExprId current = node.operands[0];
-    const ExprId next = node.operands[1];
-    const ExprId base = node.operands[2];
-    const ExprId slice_width = node.operands[3];
-    emit_expr(lhs, false, expr_graph, current, os); // turn off nonblocking to permit cascaded masked assigns
-    std::ostringstream ss;
-    ss << "[";
-    emit_expr_rec(expr_graph, base, "", ss);
-    if (slice_width != expr_graph.constant_one) {
-      ss << " +: ";
-      emit_expr_rec(expr_graph, slice_width, "", ss);
-    }
-    ss << "]";
-    std::string new_lhs = std::string(lhs) + ss.str();
-    emit_expr(new_lhs, false, expr_graph, next, os); // turn off nonblocking to permit cascaded masked assigns
   }
 
   void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::string_view lhs, std::ostream &os) const {
