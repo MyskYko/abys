@@ -163,6 +163,16 @@ namespace abys::ir {
     for (const auto &node : module.nodes) {
       if (node.kind == Module::NodeKind::kOp) {
         assert(node.outputs.size() == node.expr_roots.size());
+        bool fEmpty = true;
+        for (size_t i = 0; i < node.outputs.size(); i++) {
+          if (!node.outputs[i].name.empty()) {
+            fEmpty = false;
+            break;
+          }
+        }
+        if (fEmpty) {
+          continue;
+        }
         os << "  always @(*) begin\n";
         for (size_t i = 0; i < node.outputs.size(); i++) {
           if (!node.outputs[i].name.empty()) { // skip convert (already handled above)
@@ -172,9 +182,9 @@ namespace abys::ir {
         os << "  end\n";
       } else if (node.kind == Module::NodeKind::kMerge) {
         assert(node.outputs.size() == 1);
-        os << "  always @(*) begin\n";
         std::string name = node.outputs[0].name;
         if (!name.empty()) {
+          os << "  always @(*) begin\n";
           for (const auto &input : node.inputs) {
             const auto &input_node = module.nodes[input.node_id];
             assert(input.node_id < module.nodes.size());
@@ -182,8 +192,8 @@ namespace abys::ir {
             assert(input.port_idx < input_node.expr_roots.size());
             emit_expr(name, false, input_node.expr_graph, input_node.expr_roots[input.port_idx], os, "    ");
           }
+          os << "  end\n";
         }
-        os << "  end\n";
       }
     }
   }
