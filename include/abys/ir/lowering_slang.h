@@ -49,10 +49,22 @@ namespace abys::ir {
     return expr.type->isSigned();
   }
 
+  std::string lower_symbol_name(const slang::ast::Symbol& symbol) {
+    // TODO: implement using a map for generate block symbols
+    return std::string(symbol.name);
+  }
+
+  std::string register_symbol_name(const slang::ast::Symbol& symbol, std::string suffix = "") {
+    // TODO: register to map
+    std::string name = std::string(symbol.name);
+    name += suffix;
+    return name;
+  }
+
   std::string extract_named_value(const slang::ast::Expression &expr) {
     assert(expr.kind == slang::ast::ExpressionKind::NamedValue);
     const auto &named = expr.as<slang::ast::NamedValueExpression>();
-    return std::string(named.symbol.name);
+    return lower_symbol_name(named.symbol);
   }
 
   BitIndex extract_constant_index(const slang::ast::Expression &expr) {
@@ -114,7 +126,7 @@ namespace abys::ir {
       SignalWidth width;
       bool sign;
       get_width_sign(type, width, sign);
-      ExprId id = builder_.find_or_create_input(std::string(expr.symbol.name), width, sign);      
+      ExprId id = builder_.find_or_create_input(lower_symbol_name(expr.symbol), width, sign);      
       expr_stack_.push_back(id);
     }
 
@@ -798,6 +810,9 @@ namespace abys::ir {
 
     std::vector<ModuleId> module_stack_;
     std::unordered_map<const slang::ast::InstanceBodySymbol *, ModuleId> module_ids_;
+    
+    std::unordered_map<const slang::ast::Symbol *, std::string> special_symbols_;
+    // TODO: think about unordered_map size
 
     ModuleId current_module_id() const {
       if (module_stack_.empty()) {
@@ -818,8 +833,9 @@ namespace abys::ir {
       return node_id;
     }
 
-    void create_variable(const slang::ast::ValueSymbol &symbol, bool net) {
+    std::string create_variable(const slang::ast::ValueSymbol &symbol, bool net) {
       const auto &type = symbol.getType().getCanonicalType();
+      std::string name;
       if (type.isUnpackedArray()) {
         std::vector<SignalWidth> dims;
         const slang::ast::Type *t = &type;
@@ -840,7 +856,8 @@ namespace abys::ir {
             reg = elem.as<slang::ast::IntegralType>().isDeclaredReg();
           }
         }
-        builder_.create_packed_variable(current_module_id(), std::string(symbol.name), std::move(dims), width, sign, net, reg);
+        name = register_symbol_name(symbol);
+        builder_.create_packed_variable(current_module_id(), name, std::move(dims), width, sign, net, reg);
       } else {
         const SignalWidth width = type.getBitstreamWidth();
         const bool sign = type.isSigned();
@@ -850,8 +867,10 @@ namespace abys::ir {
             reg = type.as<slang::ast::IntegralType>().isDeclaredReg();
           }
         }
-        builder_.create_variable(current_module_id(), std::string(symbol.name), width, sign, net, reg);
+        name = register_symbol_name(symbol);
+        builder_.create_variable(current_module_id(), name, width, sign, net, reg);
       }
+      return name;
       // TODO: implement debugging (mismatch, unused, or nondeclared)
     }
 
@@ -892,7 +911,7 @@ namespace abys::ir {
       const NodeId node_id = builder_.create_operation(module_id);
       ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
       const ExprId expr_id = build_expr(*init, expr_builder);
-      builder_.add_node_output_expr(module_id, node_id, std::string(symbol.name), expr_id, true);
+      builder_.add_node_output_expr(module_id, node_id, register_symbol_name(symbol), expr_id, true);
       create_variable(symbol, false);
       // TODO: probably we want parameters directly assigned as a constant, by passing a list to expr builder
     }
@@ -956,6 +975,7 @@ namespace abys::ir {
 	assert(it != module_ids_.end());
 	const ModuleId instance_module_id = it->second;
 
+        // TODO: name may be good to be supplemented by generate block signature
 	const NodeId node_id = builder_.create_instance(module_id, std::string(symbol.name), instance_module_id);
 
 	for (const auto *conn : symbol.getPortConnections()) {
@@ -1049,7 +1069,7 @@ namespace abys::ir {
     }
     
     void handle(const slang::ast::NetSymbol &symbol) {
-      create_variable(symbol, true);
+      const std::string variable_name = create_variable(symbol, true);
       const auto *init = symbol.getInitializer();
       if (!init) {
         return;
@@ -1061,7 +1081,7 @@ namespace abys::ir {
       expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
         builder_.add_node_input_spec(module_id, node_id, name, width, sign);
       });
-      builder_.add_node_output_expr(module_id, node_id, std::string(symbol.name), rhs_id, true);
+      builder_.add_node_output_expr(module_id, node_id, variable_name, rhs_id, true);
     }
     
     void handle(const slang::ast::ProceduralBlockSymbol &symbol) {

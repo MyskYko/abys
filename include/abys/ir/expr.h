@@ -60,6 +60,7 @@ namespace abys::ir {
       std::string value; // TODO: think about better structure
     };
 
+    // TODO: probably a better way is to hold map from subr to subr_id in visitor and use subr_id here
     struct Call {
       ExprId id;
       const void *subr_ptr;
