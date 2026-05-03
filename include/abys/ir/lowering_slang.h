@@ -49,22 +49,25 @@ namespace abys::ir {
     return expr.type->isSigned();
   }
 
-  std::string lower_symbol_name(const slang::ast::Symbol& symbol) {
-    // TODO: implement using a map for generate block symbols
+  std::string lower_symbol_name(const slang::ast::Symbol& symbol, std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols) {
+    auto it = special_symbols.find(&symbol);
+    if (it != special_symbols.end()) {
+      return it->second;
+    }
     return std::string(symbol.name);
   }
 
-  std::string register_symbol_name(const slang::ast::Symbol& symbol, std::string suffix = "") {
-    // TODO: register to map
+  std::string register_symbol_name(const slang::ast::Symbol& symbol, std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols, std::string suffix = "") {
     std::string name = std::string(symbol.name);
     name += suffix;
+    special_symbols[&symbol] = name;
     return name;
   }
 
-  std::string extract_named_value(const slang::ast::Expression &expr) {
+  std::string extract_named_value(const slang::ast::Expression &expr, std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols) {
     assert(expr.kind == slang::ast::ExpressionKind::NamedValue);
     const auto &named = expr.as<slang::ast::NamedValueExpression>();
-    return lower_symbol_name(named.symbol);
+    return lower_symbol_name(named.symbol, special_symbols);
   }
 
   BitIndex extract_constant_index(const slang::ast::Expression &expr) {
@@ -101,10 +104,11 @@ namespace abys::ir {
     : public slang::ast::ASTVisitor<SlangExprLoweringVisitor<Builder>, false, true, false, true> {
   private:
     Builder &builder_;
+    std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols_;
     std::vector<ExprId> expr_stack_;
     
   public:
-    explicit SlangExprLoweringVisitor(Builder &builder) : builder_(builder) {}
+    explicit SlangExprLoweringVisitor(Builder &builder, std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols) : builder_(builder), special_symbols_(special_symbols) {}
 
     template<typename T>
     void handle(const T&) {
@@ -126,7 +130,7 @@ namespace abys::ir {
       SignalWidth width;
       bool sign;
       get_width_sign(type, width, sign);
-      ExprId id = builder_.find_or_create_input(lower_symbol_name(expr.symbol), width, sign);      
+      ExprId id = builder_.find_or_create_input(lower_symbol_name(expr.symbol, special_symbols_), width, sign);      
       expr_stack_.push_back(id);
     }
 
@@ -443,8 +447,8 @@ namespace abys::ir {
     }
   };
 
-  ExprId build_expr(const slang::ast::Expression &expr, ExprBuilder &expr_builder) {
-    SlangExprLoweringVisitor<ExprBuilder> expr_visitor(expr_builder);
+  ExprId build_expr(const slang::ast::Expression &expr, ExprBuilder &expr_builder, std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols) {
+    SlangExprLoweringVisitor<ExprBuilder> expr_visitor(expr_builder, special_symbols);
     expr.visit(expr_visitor);
     return expr_visitor.get_root();
   }
@@ -467,7 +471,7 @@ namespace abys::ir {
   }
     
   template <typename EmitFn>
-  void lower_lhs_assignment(const slang::ast::Expression &whole_lhs, ExprId rhs_id, SignalWidth rhs_width, ExprBuilder &expr_builder, EmitFn &&record) {
+  void lower_lhs_assignment(const slang::ast::Expression &whole_lhs, ExprId rhs_id, SignalWidth rhs_width, ExprBuilder &expr_builder, std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols, EmitFn &&record) {
     assert(rhs_width > 0);
     BitIndex remaining = rhs_width;
     auto get_rhs_id = [&](const slang::ast::Expression &lhs) -> ExprId {
@@ -485,6 +489,7 @@ namespace abys::ir {
       return expr_id;
     };
     std::vector<const slang::ast::Expression*> lhs_stack{&whole_lhs};
+    bool in_concat = false;
     while (!lhs_stack.empty()) {
       const slang::ast::Expression &lhs = *lhs_stack.back();
       lhs_stack.pop_back();
@@ -492,12 +497,20 @@ namespace abys::ir {
       ExprId expr_id = kInvalidExprId;
       if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
         expr_id = get_rhs_id(lhs);
-        output_name = extract_named_value(lhs);
+        if (in_concat) {
+          SignalWidth width;
+          bool sign;
+          get_width_sign(*lhs.type, width, sign);
+          if (expr_builder.get_sign(expr_id) != sign) {
+            expr_id = expr_builder.create_convert(expr_id, width, sign);
+          }
+        }
+        output_name = extract_named_value(lhs, special_symbols);
       } else if (lhs.kind == slang::ast::ExpressionKind::ElementSelect) {
         expr_id = get_rhs_id(lhs);
         const auto &sel = lhs.as<slang::ast::ElementSelectExpression>();
-        output_name = extract_named_value(sel.value());
-        const ExprId index_id = build_expr(sel.selector(), expr_builder);
+        output_name = extract_named_value(sel.value(), special_symbols);
+        const ExprId index_id = build_expr(sel.selector(), expr_builder, special_symbols);
         const auto &type = *sel.value().type;
         SignalWidth width;
         bool sign;
@@ -507,7 +520,7 @@ namespace abys::ir {
       } else if (lhs.kind == slang::ast::ExpressionKind::RangeSelect) {
         expr_id = get_rhs_id(lhs);
         const auto &sel = lhs.as<slang::ast::RangeSelectExpression>();
-        output_name = extract_named_value(sel.value());
+        output_name = extract_named_value(sel.value(), special_symbols);
         const auto kind = sel.getSelectionKind();
         const auto &left = sel.left();
         const auto &right = sel.right();
@@ -524,7 +537,7 @@ namespace abys::ir {
                    kind == slang::ast::RangeSelectionKind::IndexedDown) {
           const BitIndex slice_width = extract_constant_index(right);
           assert(slice_width >= 0);
-          const ExprId base_id = build_expr(left, expr_builder);
+          const ExprId base_id = build_expr(left, expr_builder, special_symbols);
           const bool dir = (kind == slang::ast::RangeSelectionKind::IndexedUp);
           expr_id = expr_builder.assign_part_select(expr_id, base_id, slice_width, dir, output_name, width, sign, range.left, range.right);
         } else {
@@ -535,6 +548,7 @@ namespace abys::ir {
         for (auto it = cat.operands().rbegin(); it != cat.operands().rend(); ++it) {
           lhs_stack.push_back(*it);
         }
+        in_concat = true;
         continue;
       } else {
         throw std::logic_error("Unsupported LHS");
@@ -549,9 +563,10 @@ namespace abys::ir {
     : public slang::ast::ASTVisitor<SlangStmtLoweringVisitor<Builder>, true, false, false, true> {
   private:
     Builder &builder_;
+    std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols_;
 
   public:
-    explicit SlangStmtLoweringVisitor(Builder &builder) : builder_(builder) {}
+    explicit SlangStmtLoweringVisitor(Builder &builder, std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols) : builder_(builder), special_symbols_(special_symbols) {}
 
     template<typename T>
     void handle(const T&) {
@@ -569,7 +584,7 @@ namespace abys::ir {
       const std::string name(symbol.name);
       builder_.add_local_variable(name);
       if (const auto *init = symbol.getInitializer()) {
-        ExprId expr_id = build_expr(*init, builder_.get_expr_builder());
+        ExprId expr_id = build_expr(*init, builder_.get_expr_builder(), special_symbols_);
         builder_.get_expr_builder().update_value(name, expr_id);
         builder_.output_names().push_back(name);
         builder_.output_nonblocking().push_back(false);
@@ -591,11 +606,11 @@ namespace abys::ir {
       }
       const auto &assign = stmt.expr.as<slang::ast::AssignmentExpression>();
       assert(!assign.isCompound()); // TODO: we need to handle this later
-      ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder());
+      ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), special_symbols_);
       const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
       const bool nonblocking = assign.isNonBlocking();
       std::unordered_map<std::string, ExprId> to_restore;
-      lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), [&](const std::string &output_name, ExprId expr_id) {
+      lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), special_symbols_, [&](const std::string &output_name, ExprId expr_id) {
         if (nonblocking && !to_restore.count(output_name)) {
           to_restore[output_name] = builder_.get_expr_builder().get_current_value(output_name);
         }
@@ -612,7 +627,7 @@ namespace abys::ir {
     void handle(const slang::ast::ConditionalStatement &stmt) {
       std::vector<ExprId> cond_ids;
       for (const auto &cond : stmt.conditions) {
-	ExprId cond_id = build_expr(*cond.expr, builder_.get_expr_builder());
+	ExprId cond_id = build_expr(*cond.expr, builder_.get_expr_builder(), special_symbols_);
 	cond_ids.push_back(cond_id);
       }
       assert(!cond_ids.empty());
@@ -635,12 +650,12 @@ namespace abys::ir {
 
     void handle(const slang::ast::CaseStatement &stmt) {
       size_t index = builder_.get_context_stack_index();
-      ExprId case_id = build_expr(stmt.expr, builder_.get_expr_builder());
+      ExprId case_id = build_expr(stmt.expr, builder_.get_expr_builder(), special_symbols_);
       std::vector<ExprId> case_values;
       for (auto &item : stmt.items) {
 	std::vector<ExprId> values;
 	for (auto *v : item.expressions) {
-	  values.push_back(build_expr(*v, builder_.get_expr_builder()));
+	  values.push_back(build_expr(*v, builder_.get_expr_builder(), special_symbols_));
 	}
 	ExprId value_id = kInvalidExprId;
 	if (values.size() > 1) {
@@ -668,7 +683,7 @@ namespace abys::ir {
           const std::string name(var->name);
           builder_.add_local_variable(name);
           if (const auto *init = var->getInitializer()) {
-            ExprId expr_id = build_expr(*init, builder_.get_expr_builder());
+            ExprId expr_id = build_expr(*init, builder_.get_expr_builder(), special_symbols_);
             builder_.get_expr_builder().update_value(name, expr_id);
             builder_.output_names().push_back(name);
             builder_.output_nonblocking().push_back(false);
@@ -688,9 +703,9 @@ namespace abys::ir {
           throw std::logic_error("compound for-loop initializer is unsupported");
         }
         assert(!assign.isNonBlocking());
-        ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder());
+        ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), special_symbols_);
         const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
-        lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), [&](const std::string &output_name, ExprId expr_id) {
+        lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), special_symbols_, [&](const std::string &output_name, ExprId expr_id) {
           builder_.get_expr_builder().update_value(output_name, expr_id);
           builder_.output_names().push_back(output_name);
           builder_.output_nonblocking().push_back(false);
@@ -703,7 +718,7 @@ namespace abys::ir {
           // TODO: handle break/continue
           throw std::logic_error("for-loop without stop condition is unsupported");
         }
-        ExprId stop_id = build_expr(*stmt.stopExpr, builder_.get_expr_builder());
+        ExprId stop_id = build_expr(*stmt.stopExpr, builder_.get_expr_builder(), special_symbols_);
         if (!builder_.get_expr_builder().evaluate(stop_id)) {
           break;
         }
@@ -720,9 +735,9 @@ namespace abys::ir {
             throw std::logic_error("compound is unsupported");
           }
           assert(!assign.isNonBlocking());
-          ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder());
+          ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), special_symbols_);
           const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
-          lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), [&](const std::string &output_name, ExprId expr_id) {
+          lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), special_symbols_, [&](const std::string &output_name, ExprId expr_id) {
             builder_.get_expr_builder().update_value(output_name, expr_id);
             builder_.output_names().push_back(output_name);
             builder_.output_nonblocking().push_back(false);
@@ -756,8 +771,8 @@ namespace abys::ir {
 	throw std::logic_error("Nested TimedStatement");
       }
       auto add_event = [&](const slang::ast::SignalEventControl &ev) {
-        const ExprId expr_id = build_expr(ev.expr, builder_.get_expr_builder());
-        const ExprId iff_id = ev.iffCondition ? build_expr(*ev.iffCondition, builder_.get_expr_builder()) : kInvalidExprId;
+        const ExprId expr_id = build_expr(ev.expr, builder_.get_expr_builder(), special_symbols_);
+        const ExprId iff_id = ev.iffCondition ? build_expr(*ev.iffCondition, builder_.get_expr_builder(), special_symbols_) : kInvalidExprId;
         const bool pos = ev.edge == slang::ast::EdgeKind::PosEdge || ev.edge == slang::ast::EdgeKind::BothEdges;
         const bool neg = ev.edge == slang::ast::EdgeKind::NegEdge || ev.edge == slang::ast::EdgeKind::BothEdges;
         builder_.add_timing(expr_id, iff_id, pos, neg);
@@ -810,7 +825,8 @@ namespace abys::ir {
 
     std::vector<ModuleId> module_stack_;
     std::unordered_map<const slang::ast::InstanceBodySymbol *, ModuleId> module_ids_;
-    
+
+    std::string suffix_;
     std::unordered_map<const slang::ast::Symbol *, std::string> special_symbols_;
     // TODO: think about unordered_map size
 
@@ -825,7 +841,7 @@ namespace abys::ir {
       const ModuleId module_id = current_module_id();
       const NodeId node_id = builder_.create_operation(module_id);
       ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
-      const ExprId expr_id = build_expr(expr, expr_builder);
+      const ExprId expr_id = build_expr(expr, expr_builder, special_symbols_);
       expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
         builder_.add_node_input_spec(module_id, node_id, name, width, sign);
       });
@@ -856,7 +872,7 @@ namespace abys::ir {
             reg = elem.as<slang::ast::IntegralType>().isDeclaredReg();
           }
         }
-        name = register_symbol_name(symbol);
+        name = register_symbol_name(symbol, special_symbols_, suffix_);
         builder_.create_packed_variable(current_module_id(), name, std::move(dims), width, sign, net, reg);
       } else {
         const SignalWidth width = type.getBitstreamWidth();
@@ -867,7 +883,7 @@ namespace abys::ir {
             reg = type.as<slang::ast::IntegralType>().isDeclaredReg();
           }
         }
-        name = register_symbol_name(symbol);
+        name = register_symbol_name(symbol, special_symbols_, suffix_);
         builder_.create_variable(current_module_id(), name, width, sign, net, reg);
       }
       return name;
@@ -882,7 +898,7 @@ namespace abys::ir {
       assert(expr.kind == slang::ast::ExpressionKind::Assignment);
       const auto &assign = expr.as<slang::ast::AssignmentExpression>();
       assert(assign.right().kind == slang::ast::ExpressionKind::EmptyArgument);
-      return extract_named_value(assign.left());
+      return extract_named_value(assign.left(), special_symbols_);
     }
 
     abys::ir::SignalWidth port_width(const slang::ast::PortSymbol &port) {
@@ -902,6 +918,24 @@ namespace abys::ir {
 			     );
     }
 
+    void handle(const slang::ast::DefParamSymbol &) {
+      // Defparams are elaboration-time parameter overrides. Slang has already
+      // applied them to instance bodies by the time lowering runs.
+    }
+
+    void handle(const slang::ast::SpecifyBlockSymbol &) {
+      // Specify blocks describe simulation timing paths/checks; ignore for synthesis lowering.
+    }
+
+    // TODO: not sure the following two symbols are okay to be just transparent
+    void handle(const slang::ast::TransparentMemberSymbol &symbol) {
+      this->visitDefault(symbol);
+    }
+
+    void handle(const slang::ast::StatementBlockSymbol &symbol) {
+      this->visitDefault(symbol);
+    }
+
     void handle(const slang::ast::ParameterSymbol &symbol) {
       const auto* init = symbol.getInitializer();
       if (!init) {
@@ -910,8 +944,8 @@ namespace abys::ir {
       const ModuleId module_id = current_module_id();
       const NodeId node_id = builder_.create_operation(module_id);
       ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
-      const ExprId expr_id = build_expr(*init, expr_builder);
-      builder_.add_node_output_expr(module_id, node_id, register_symbol_name(symbol), expr_id, true);
+      const ExprId expr_id = build_expr(*init, expr_builder, special_symbols_);
+      builder_.add_node_output_expr(module_id, node_id, register_symbol_name(symbol, special_symbols_), expr_id, true);
       create_variable(symbol, false);
       // TODO: probably we want parameters directly assigned as a constant, by passing a list to expr builder
     }
@@ -965,7 +999,10 @@ namespace abys::ir {
     }
 
     void handle(const slang::ast::InstanceSymbol &symbol) {
+      const std::string suffix = suffix_;
+      suffix_.clear();
       this->visitDefault(symbol);
+      suffix_ = suffix;
 
       if(current_module_id() != kInvalidModuleId) {
 	const ModuleId module_id = current_module_id();
@@ -993,7 +1030,7 @@ namespace abys::ir {
 	      builder_.add_node_input(module_id, node_id, input_id);
 	    } else {
               // TODO: handle unpacked
-	      builder_.add_node_input_spec(module_id, node_id, extract_named_value(*expr),
+	      builder_.add_node_input_spec(module_id, node_id, extract_named_value(*expr, special_symbols_),
                                            expr_width(*expr), expr_sign(*expr));
 	    }
 	  } else if (port.direction == slang::ast::ArgumentDirection::Out) {
@@ -1003,20 +1040,45 @@ namespace abys::ir {
             }
             assert(expr->kind == slang::ast::ExpressionKind::Assignment);
             const auto &assign = expr->as<slang::ast::AssignmentExpression>();
-            assert(assign.right().kind == slang::ast::ExpressionKind::EmptyArgument);
             const auto &lhs = assign.left();
-            const SignalWidth rhs_width = port_width(port); // TODO: handle unpacked array
-            const bool rhs_sign = port_sign(port);
-            if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
-              builder_.add_node_output(module_id, node_id, extract_named_value(lhs), rhs_width, rhs_sign);
-            } else {
+            SignalWidth rhs_width = port_width(port); // TODO: handle unpacked array
+            bool rhs_sign = port_sign(port);
+            NodeId output_node_id = node_id;
+            ExprId output_expr_id = kInvalidExprId;
+            if (assign.right().kind != slang::ast::ExpressionKind::EmptyArgument) {
+              assert(assign.right().kind == slang::ast::ExpressionKind::Conversion);
+              const auto &conv = assign.right().as<slang::ast::ConversionExpression>();
+              assert(conv.operand().kind == slang::ast::ExpressionKind::EmptyArgument);
               const std::string temporary_name = builder_.generate_temporary_name();
               const PortIndex port_idx = builder_.add_node_output(module_id, node_id, temporary_name, rhs_width, rhs_sign);
+              output_node_id = builder_.create_operation(module_id);
+              ExprBuilder expr_builder(builder_.get_expr_graph(module_id, output_node_id));
+              const ExprId input_id = expr_builder.find_or_create_input(temporary_name, rhs_width, rhs_sign);
+              output_expr_id = expr_builder.create_convert(input_id, expr_width(assign.right()), expr_sign(assign.right()));
+              rhs_width = expr_builder.get_width(output_expr_id);
+              rhs_sign = expr_sign(assign.right());
+              builder_.add_node_input(module_id, output_node_id, node_id, port_idx);
+            }
+            if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
+              const std::string output_name = extract_named_value(lhs, special_symbols_);
+              if (output_expr_id == kInvalidExprId) {
+                builder_.add_node_output(module_id, output_node_id, output_name, rhs_width, rhs_sign);
+              } else {
+                builder_.add_node_output_expr(module_id, output_node_id, output_name, output_expr_id, true);
+              }
+            } else {
+              const std::string temporary_name = builder_.generate_temporary_name();
+              PortIndex port_idx;
+              if (output_expr_id == kInvalidExprId) {
+                port_idx = builder_.add_node_output(module_id, output_node_id, temporary_name, rhs_width, rhs_sign);
+              } else {
+                port_idx = builder_.add_node_output_expr(module_id, output_node_id, temporary_name, output_expr_id, true);
+              }
               const NodeId op_id = builder_.create_operation(module_id);
               ExprBuilder expr_builder(builder_.get_expr_graph(module_id, op_id));
               ExprId rhs_id = expr_builder.find_or_create_input(temporary_name, rhs_width, rhs_sign);
               std::unordered_map<std::string, ExprId> to_store;
-              lower_lhs_assignment(lhs, rhs_id, rhs_width, expr_builder, [&](const std::string &output_name, ExprId expr_id) {
+              lower_lhs_assignment(lhs, rhs_id, rhs_width, expr_builder, special_symbols_, [&](const std::string &output_name, ExprId expr_id) {
                 expr_builder.update_value(output_name, expr_id);
                 to_store[output_name] = expr_id;
               });
@@ -1041,10 +1103,10 @@ namespace abys::ir {
       const ModuleId module_id = current_module_id();
       const NodeId node_id = builder_.create_operation(module_id);
       ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
-      ExprId rhs_id = build_expr(assign_expr.right(), expr_builder);
+      ExprId rhs_id = build_expr(assign_expr.right(), expr_builder, special_symbols_);
       const SignalWidth rhs_width = expr_builder.get_width(rhs_id);
       std::unordered_map<std::string, ExprId> to_store;
-      lower_lhs_assignment(assign_expr.left(), rhs_id, rhs_width, expr_builder, [&](const std::string &output_name, ExprId expr_id) {
+      lower_lhs_assignment(assign_expr.left(), rhs_id, rhs_width, expr_builder, special_symbols_, [&](const std::string &output_name, ExprId expr_id) {
         expr_builder.update_value(output_name, expr_id);
         to_store[output_name] = expr_id;
       });
@@ -1077,7 +1139,7 @@ namespace abys::ir {
       const ModuleId module_id = current_module_id();
       const NodeId node_id = builder_.create_operation(module_id);
       ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
-      ExprId rhs_id = build_expr(*init, expr_builder);
+      ExprId rhs_id = build_expr(*init, expr_builder, special_symbols_);
       expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
         builder_.add_node_input_spec(module_id, node_id, name, width, sign);
       });
@@ -1085,6 +1147,11 @@ namespace abys::ir {
     }
     
     void handle(const slang::ast::ProceduralBlockSymbol &symbol) {
+      if (symbol.procedureKind == slang::ast::ProceduralBlockKind::Initial ||
+          symbol.procedureKind == slang::ast::ProceduralBlockKind::Final) {
+        std::cerr << "warning: ignoring procedural block: " << slang::ast::SemanticFacts::getProcedureKindStr(symbol.procedureKind) << std::endl;
+        return;
+      }
       const ModuleId module_id = current_module_id();
       const NodeId node_id = builder_.create_operation(module_id);
       StmtBuilder stmt_builder(builder_.get_expr_graph(module_id, node_id));
@@ -1103,7 +1170,7 @@ namespace abys::ir {
       default:
         throw std::logic_error("Unknown procedural block kind");
       }
-      SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder);
+      SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder, special_symbols_);
       const slang::ast::Statement& stmt = symbol.getBody();
       stmt.visit(stmt_visitor);
       stmt_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
@@ -1150,7 +1217,7 @@ namespace abys::ir {
         subr.inputs.emplace_back(Tig::Subroutine::Port{std::string(arg->name), type.getBitstreamWidth(), type.isSigned()});
       }
       StmtBuilder stmt_builder(subr.expr_graph);
-      SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder);
+      SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder, special_symbols_);
       symbol.getBody().visit(stmt_visitor);
       const ExprId ret = stmt_builder.get_expr_builder().get_current_value(symbol.name);
       if (ret == kInvalidExprId) {
@@ -1158,6 +1225,31 @@ namespace abys::ir {
       }
       subr.expr_root = ret;
       builder_.add_subroutine(std::move(subr)); // add API
+    }
+
+    void handle(const slang::ast::GenerateBlockSymbol &symbol) {
+      if (symbol.isUninstantiated) {
+        return;
+      }
+      std::string frag = "_";
+      frag += symbol.getExternalName();
+      if (symbol.arrayIndex) {
+        auto idx = symbol.arrayIndex->as<int64_t>();
+        if (idx) {
+          frag += "_" + std::to_string(*idx);
+        }
+      }
+      std::string suffix = suffix_;
+      if (suffix_.empty()) {
+        suffix_ = "_abys";  // TODO: add prefix/suffix management system for internal signals
+      }
+      suffix_ += frag;
+      this->visitDefault(symbol);
+      suffix_ = suffix;
+    }
+
+    void handle(const slang::ast::GenerateBlockArraySymbol &symbol) {
+      this->visitDefault(symbol);
     }
   };
   

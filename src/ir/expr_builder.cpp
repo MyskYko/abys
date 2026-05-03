@@ -23,6 +23,9 @@ namespace abys::ir {
   SignalWidth ExprBuilder::get_width(ExprId id) const {
     return graph_.nodes[id].width;
   }
+  bool ExprBuilder::get_sign(ExprId id) const {
+    return graph_.nodes[id].sign;
+  }
 
   ExprId ExprBuilder::get_constant_zero() const {
     return graph_.constant_zero;

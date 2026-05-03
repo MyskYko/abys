@@ -1,6 +1,7 @@
 #include "abys/ir/tig_builder.h"
 
 #include <cassert>
+#include <iostream>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
@@ -180,8 +181,10 @@ namespace abys::ir {
         assert(it->second.node_id != kInvalidNodeId);
         Node &current_node = module.nodes[it->second.node_id];
         if (current_node.kind != NodeKind::kMerge) {
-          assert(current_node.kind == NodeKind::kOp);
-          current_node.outputs[it->second.port_idx].name.clear();
+          if(current_node.kind == NodeKind::kOp) {
+            // TODO: handle multi-driver
+            current_node.outputs[it->second.port_idx].name.clear();
+          }
           NodeId merge_id = create_merge(module_id); // current_node may be invalidated here
           Node &merge_node = module.nodes[merge_id];
           merge_node.outputs.emplace_back(std::move(name), width, sign);
@@ -340,7 +343,10 @@ namespace abys::ir {
         const std::string &name = specs[i].name;
         if (!name.empty()) {
           const auto it = module.signal_map.find(name);
-          assert(it != module.signal_map.end());
+          if (it == module.signal_map.end()) {
+            std::cerr << "warning: leaving unresolved signal input unconnected: "<< module.name << "." << name << "\n"; // TODO: decide warning system
+            continue;
+          }
           assert(it->second.node_id != kInvalidNodeId);
           const auto spec = get_signal_spec(module_id, it->second);
           assert(specs[i].width == spec.width);

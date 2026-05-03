@@ -188,9 +188,12 @@ namespace abys::ir {
           for (const auto &input : node.inputs) {
             const auto &input_node = module.nodes[input.node_id];
             assert(input.node_id < module.nodes.size());
-            assert(input_node.kind == Module::NodeKind::kOp);
             assert(input.port_idx < input_node.expr_roots.size());
-            emit_expr(name, false, input_node.expr_graph, input_node.expr_roots[input.port_idx], os, "    ");
+            if(input_node.kind == Module::NodeKind::kOp) {
+              emit_expr(name, false, input_node.expr_graph, input_node.expr_roots[input.port_idx], os, "    ");
+            } else {
+              // TODO: handle multi_driver
+            }
           }
           os << "  end\n";
         }

@@ -19,6 +19,7 @@ namespace abys::ir {
 
     ExprGraph::Node &get_node(ExprId id);
     SignalWidth get_width(ExprId id) const;
+    bool get_sign(ExprId id) const;
     
     ExprId find_or_create_input(std::string name, SignalWidth width, bool sign);
     ExprId find_or_create_const(std::string value, SignalWidth width, bool sign);
