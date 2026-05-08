@@ -8,6 +8,8 @@
 #include "abys/ir/expr.h"
 #include "abys/ir/type.h"
 
+// TODO: unordered_map should always be reserved somehow
+
 namespace abys::ir {
 
   struct Tig {

@@ -1,3 +1,4 @@
+#include <iostream>
 #include <stdexcept>
 #include <cassert>
 
@@ -89,7 +90,8 @@ namespace abys::ir {
     }
     if (edge_kind == EdgeKind::kNone) {
       if (!is_comb_or_latch() && !is_undecided()) {
-        throw std::logic_error("Level-sensitive timing in non-undecided block");
+        std::cerr << "warning: ignoring level-sensitive event in edge-sensitive procedural block" << std::endl;
+        return;
       }
       set_comb_or_latch();
     } else {
@@ -119,13 +121,36 @@ namespace abys::ir {
     output_nonblocking().push_back(from.output_nonblocking[i]);
     output_ids().push_back(expr_id);
   }
+
+  std::vector<size_t> StmtBuilder::collect_last_output_indices(const Context &ctx) {
+    std::unordered_map<std::string, size_t> last_index;
+    for (size_t i = 0; i < ctx.output_names.size(); i++) {
+      const std::string &name = ctx.output_names[i];
+      auto it = last_index.find(name);
+      if (it != last_index.end()) {
+        if (ctx.output_nonblocking[it->second] != ctx.output_nonblocking[i]) {
+          throw std::logic_error("Mixed blocking and nonblocking assignments to " + name);
+        }
+        it->second = i;
+      } else {
+        last_index[name] = i;
+      }
+    }
+    std::vector<size_t> indices;
+    indices.reserve(last_index.size());
+    for (size_t i = 0; i < ctx.output_names.size(); i++) {
+      if (last_index[ctx.output_names[i]] == i) {
+        indices.push_back(i);
+      }
+    }
+    return indices;
+  }
   
   void StmtBuilder::merge_context() {
     assert(contexts_.size() > 1);
     Context child = std::move(contexts_.back());
     contexts_.pop_back();
-    // append outputs if not local & update their current values
-    for (size_t i = 0; i < child.output_names.size(); i++) {
+    for (size_t i : collect_last_output_indices(child)) {
       if (child.local_names.count(child.output_names[i])) {
 	continue;
       }
@@ -139,20 +164,22 @@ namespace abys::ir {
     context_stack_.pop_back();
     Context then_ctx = std::move(context_stack_.back());
     context_stack_.pop_back();
+    const auto then_indices = collect_last_output_indices(then_ctx);
+    const auto else_indices = collect_last_output_indices(else_ctx);
     // compute shared outputs
     std::unordered_set<std::string> then_outputs;
-    for (size_t i = 0; i < then_ctx.output_names.size(); i++) {
+    for (size_t i : then_indices) {
       then_outputs.insert(then_ctx.output_names[i]);
     }
     std::unordered_map<std::string, size_t> shared_output_to_else_index;
-    for (size_t i = 0; i < else_ctx.output_names.size(); i++) {
+    for (size_t i : else_indices) {
       if (then_outputs.count(else_ctx.output_names[i])) {
 	shared_output_to_else_index[else_ctx.output_names[i]] = i;
       }
     }
     // append then/shared outputs if not local & update their current values
     ExprBuilder &expr_builder = get_expr_builder();
-    for (size_t i = 0; i < then_ctx.output_names.size(); i++) {
+    for (size_t i : then_indices) {
       assert (then_ctx.local_names.empty()); // assuming locals can only be declared in block, which removes local on merge
       const std::string &name = then_ctx.output_names[i];
       auto it = shared_output_to_else_index.find(name);
@@ -175,7 +202,7 @@ namespace abys::ir {
       transfer_output(then_ctx, i, new_id);
     }
     // append else/non-shared outputs if not local & update their current values
-    for (size_t i = 0; i < else_ctx.output_names.size(); i++) {
+    for (size_t i : else_indices) {
       assert(else_ctx.local_names.empty());
       const std::string &name = else_ctx.output_names[i];
       if (shared_output_to_else_index.count(name)) {

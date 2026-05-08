@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -107,6 +108,7 @@ namespace abys::ir {
     void get_input_spec(ExprId id, ExprId &input_id, std::string &name, SignalWidth &width, bool &sign) const;
     bool check_dependency(ExprId id, ExprId target) const;
 
+    std::optional<int> try_evaluate(ExprId id) const;
     int evaluate(ExprId id) const;
 
   private:

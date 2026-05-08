@@ -133,14 +133,18 @@ namespace abys::ir {
         first = false;
         const auto &p = child.input_ports[i];
         const auto &data_ref = node.inputs[i];
-        const auto &data_node = module.nodes[data_ref.node_id];        
-        const std::string data_name = data_node.outputs[data_ref.port_idx].name;
         os << "    ." << p.name << "(";
-        if (data_name.empty()) { // handle convert
-          assert(data_ref.port_idx < data_node.expr_roots.size());
-          emit_expr_rec(data_node.expr_graph, data_node.expr_roots[data_ref.port_idx], "", os);
+        if (data_ref.node_id == Tig::kInvalidNodeId) {
+          os << "1'bx";
         } else {
-          os << data_name;
+          const auto &data_node = module.nodes[data_ref.node_id];        
+          const std::string data_name = data_node.outputs[data_ref.port_idx].name;
+          if (data_name.empty()) { // handle convert
+            assert(data_ref.port_idx < data_node.expr_roots.size());
+            emit_expr_rec(data_node.expr_graph, data_node.expr_roots[data_ref.port_idx], "", os);
+          } else {
+            os << data_name;
+          }
         }
         os << ")";
       }

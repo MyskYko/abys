@@ -631,6 +631,191 @@ namespace abys::ir {
     return false;
   }
 
+  std::optional<int> ExprBuilder::try_evaluate(ExprId id) const {
+    assert(id != kInvalidExprId);
+    const auto &node = graph_.nodes[id];
+    switch (node.op) {
+    case ExprGraph::Op::kUnknown:
+    case ExprGraph::Op::kInput:
+      return std::nullopt;
+    case ExprGraph::Op::kConst: {
+      for (const auto &c : graph_.constants) {
+        if (c.id != id) {
+          continue;
+        }
+        const std::string &s = c.value;
+        auto pos = s.find('\'');
+        if (pos == std::string::npos) {
+          return std::nullopt;
+        }
+        if (s[pos + 1] == 's') {
+          pos++;
+        }
+        if (s[pos + 1] != 'b') {
+          return std::nullopt;
+        }
+        pos += 2;
+        int value = 0;
+        for (char ch : s.substr(pos)) {
+          if (ch != '0' && ch != '1') {
+            return std::nullopt;
+          }
+          value = (value << 1) | (ch - '0');
+        }
+        return value;
+      }
+      return std::nullopt;
+    }
+    case ExprGraph::Op::kLogicalNot:
+      if (auto opr = try_evaluate(node.operands[0])) {
+        return !*opr;
+      }
+      return std::nullopt;
+    case ExprGraph::Op::kAndReduce: {
+      const ExprId op_id = node.operands[0];
+      const auto &op_node = graph_.nodes[op_id];
+      auto opr = try_evaluate(op_id);
+      if (!opr) {
+        return std::nullopt;
+      }
+      for (SignalWidth i = 0; i < op_node.width; i++) {
+        if (((*opr >> i) & 1) == 0) {
+          return 0;
+        }
+      }
+      return 1;
+    }
+    case ExprGraph::Op::kOrReduce: {
+      const ExprId op_id = node.operands[0];
+      const auto &op_node = graph_.nodes[op_id];
+      auto opr = try_evaluate(op_id);
+      if (!opr) {
+        return std::nullopt;
+      }
+      for (SignalWidth i = 0; i < op_node.width; i++) {
+        if ((*opr >> i) & 1) {
+          return 1;
+        }
+      }
+      return 0;
+    }
+    case ExprGraph::Op::kXorReduce: {
+      const ExprId op_id = node.operands[0];
+      const auto &op_node = graph_.nodes[op_id];
+      auto opr = try_evaluate(op_id);
+      if (!opr) {
+        return std::nullopt;
+      }
+      int value = 0;
+      for (SignalWidth i = 0; i < op_node.width; i++) {
+        value ^= (*opr >> i) & 1;
+      }
+      return value;
+    }
+    case ExprGraph::Op::kBitwiseNot:
+      if (auto opr = try_evaluate(node.operands[0])) {
+        return ~*opr;
+      }
+      return std::nullopt;
+    case ExprGraph::Op::kAnd:
+    case ExprGraph::Op::kOr:
+    case ExprGraph::Op::kXor: {
+      if (node.operands.empty()) {
+        return std::nullopt;
+      }
+      auto value = try_evaluate(node.operands[0]);
+      if (!value) {
+        return std::nullopt;
+      }
+      for (size_t i = 1; i < node.operands.size(); i++) {
+        auto opr = try_evaluate(node.operands[i]);
+        if (!opr) {
+          return std::nullopt;
+        }
+        if (node.op == ExprGraph::Op::kAnd) {
+          *value &= *opr;
+        } else if (node.op == ExprGraph::Op::kOr) {
+          *value |= *opr;
+        } else {
+          *value ^= *opr;
+        }
+      }
+      return value;
+    }
+    case ExprGraph::Op::kUnaryMinus:
+      if (auto opr = try_evaluate(node.operands[0])) {
+        return -*opr;
+      }
+      return std::nullopt;
+    case ExprGraph::Op::kAdd:
+    case ExprGraph::Op::kSub:
+    case ExprGraph::Op::kMul:
+    case ExprGraph::Op::kDiv:
+    case ExprGraph::Op::kMod:
+    case ExprGraph::Op::kPow:
+    case ExprGraph::Op::kShl:
+    case ExprGraph::Op::kShr:
+    case ExprGraph::Op::kEq:
+    case ExprGraph::Op::kLt:
+    case ExprGraph::Op::kLe: {
+      auto lhs = try_evaluate(node.operands[0]);
+      auto rhs = try_evaluate(node.operands[1]);
+      if (!lhs || !rhs) {
+        return std::nullopt;
+      }
+      switch (node.op) {
+      case ExprGraph::Op::kAdd: return *lhs + *rhs;
+      case ExprGraph::Op::kSub: return *lhs - *rhs;
+      case ExprGraph::Op::kMul: return *lhs * *rhs;
+      case ExprGraph::Op::kDiv:
+        return *rhs == 0 ? std::nullopt : std::optional<int>(*lhs / *rhs);
+      case ExprGraph::Op::kMod:
+        return *rhs == 0 ? std::nullopt : std::optional<int>(*lhs % *rhs);
+      case ExprGraph::Op::kPow: return static_cast<int>(std::pow(*lhs, *rhs));
+      case ExprGraph::Op::kShl: return *lhs << *rhs;
+      case ExprGraph::Op::kShr: return *lhs >> *rhs;
+      case ExprGraph::Op::kEq: return *lhs == *rhs;
+      case ExprGraph::Op::kLt: return *lhs < *rhs;
+      case ExprGraph::Op::kLe: return *lhs <= *rhs;
+      default: assert(0);
+      }
+    }
+    case ExprGraph::Op::kAshr: {
+      auto value = try_evaluate(node.operands[0]);
+      auto shamt = try_evaluate(node.operands[1]);
+      if (!value || !shamt) {
+        return std::nullopt;
+      }
+      int shifted = *value;
+      int mask = shifted & (1 << (node.width - 1));
+      for (int i = 0; i < *shamt; i++) {
+        shifted = (shifted >> 1) | mask;
+      }
+      return shifted;
+    }
+    case ExprGraph::Op::kMux:
+      if (auto cond = try_evaluate(node.operands[0])) {
+        return try_evaluate(*cond ? node.operands[1] : node.operands[2]);
+      }
+      return std::nullopt;
+    case ExprGraph::Op::kConvert:
+      return try_evaluate(node.operands[0]);
+      // TODO: extend constant evaluation for these expression forms as needed.
+    case ExprGraph::Op::kList:
+    case ExprGraph::Op::kCase:
+    case ExprGraph::Op::kConcat:
+    case ExprGraph::Op::kGather:
+    case ExprGraph::Op::kMaskedAssign:
+    case ExprGraph::Op::kReverse:
+    case ExprGraph::Op::kRange:
+    case ExprGraph::Op::kArraySelect:
+    case ExprGraph::Op::kBothEdge:
+    case ExprGraph::Op::kCall:
+      return std::nullopt;
+    }
+    assert(0);
+  }
+  
   int ExprBuilder::evaluate(ExprId id) const {
     assert(id != kInvalidExprId);
     const auto &node = graph_.nodes[id];

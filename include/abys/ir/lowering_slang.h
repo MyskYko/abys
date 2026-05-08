@@ -18,9 +18,11 @@
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/MemberSymbols.h"
+#include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/symbols/PortSymbols.h"
 #include "slang/ast/types/Type.h"
 #include "slang/driver/Driver.h"
+#include "slang/parsing/KnownSystemName.h"
 
 #include "abys/ir/expr_builder.h"
 #include "abys/ir/stmt_builder.h"
@@ -130,6 +132,16 @@ namespace abys::ir {
       SignalWidth width;
       bool sign;
       get_width_sign(type, width, sign);
+      if (expr.symbol.kind == slang::ast::SymbolKind::Parameter) {
+        const auto &param = expr.symbol.as<slang::ast::ParameterSymbol>();
+        const auto &value = param.getValue();
+        if (value && value.isInteger()) {
+          const slang::SVInt v = value.integer();
+          const ExprId id = builder_.find_or_create_const(v.toString(slang::LiteralBase::Binary), width, sign);
+          expr_stack_.push_back(id);
+          return;
+        }
+      }
       ExprId id = builder_.find_or_create_input(lower_symbol_name(expr.symbol, special_symbols_), width, sign);      
       expr_stack_.push_back(id);
     }
@@ -169,7 +181,28 @@ namespace abys::ir {
         throw std::logic_error("Unsupported class member call: " + std::string(expr.getSubroutineName()));
       }
       if (expr.isSystemCall()) {
-        throw std::logic_error("Unsupported system call: " + std::string(expr.getSubroutineName()));
+        using slang::parsing::KnownSystemName;
+        switch (expr.getKnownSystemName()) {
+        case KnownSystemName::FOpen:
+        case KnownSystemName::FError:
+        case KnownSystemName::FGets:
+        case KnownSystemName::FScanf:
+        case KnownSystemName::SScanf:
+        case KnownSystemName::FRead:
+        case KnownSystemName::FGetC:
+        case KnownSystemName::UngetC:
+        case KnownSystemName::FTell:
+        case KnownSystemName::FSeek:
+        case KnownSystemName::Rewind:
+        case KnownSystemName::FEof:
+        case KnownSystemName::TestPlusArgs:
+        case KnownSystemName::ValuePlusArgs:
+          std::cerr << "warning: replacing non-synthesizable system function with zero: " << expr.getSubroutineName() << std::endl;
+          expr_stack_.push_back(builder_.find_or_create_const(std::to_string(expr_width(expr)) + "'b0", expr_width(expr), expr_sign(expr)));
+          return;
+        default:
+          throw std::logic_error("Unsupported system call: " + std::string(expr.getSubroutineName()));
+        }
       }
       const size_t index = expr_stack_.size();
       this->visitDefault(expr);
@@ -186,6 +219,7 @@ namespace abys::ir {
     }
     
     void handle(const slang::ast::ElementSelectExpression &expr) {
+      // TODO: support unpacked parameter array
       this->visitDefault(expr);
       const ExprId index = expr_stack_.back();
       expr_stack_.pop_back();
@@ -596,9 +630,56 @@ namespace abys::ir {
       if (stmt.expr.kind == slang::ast::ExpressionKind::Call) {
         const auto &call = stmt.expr.as<slang::ast::CallExpression>();
         if (call.isSystemCall()) {
-          // TODO: create warning standard in this repo
-          std::cerr << "warning: ignoring system task call in synthesis lowering: " << call.getSubroutineName() << "\n";
-          return;
+          using slang::parsing::KnownSystemName;
+          switch (call.getKnownSystemName()) {
+          case KnownSystemName::Display:
+          case KnownSystemName::DisplayH:
+          case KnownSystemName::Write:
+          case KnownSystemName::WriteB:
+          case KnownSystemName::WriteO:
+          case KnownSystemName::WriteH:
+          case KnownSystemName::Strobe:
+          case KnownSystemName::StrobeB:
+          case KnownSystemName::StrobeO:
+          case KnownSystemName::StrobeH:
+          case KnownSystemName::Monitor:
+          case KnownSystemName::MonitorB:
+          case KnownSystemName::MonitorO:
+          case KnownSystemName::MonitorH:
+          case KnownSystemName::FDisplay:
+          case KnownSystemName::FDisplayB:
+          case KnownSystemName::FDisplayO:
+          case KnownSystemName::FDisplayH:
+          case KnownSystemName::FWrite:
+          case KnownSystemName::FWriteB:
+          case KnownSystemName::FWriteO:
+          case KnownSystemName::FWriteH:
+          case KnownSystemName::FStrobe:
+          case KnownSystemName::FStrobeB:
+          case KnownSystemName::FStrobeO:
+          case KnownSystemName::FStrobeH:
+          case KnownSystemName::FMonitor:
+          case KnownSystemName::FMonitorB:
+          case KnownSystemName::FMonitorO:
+          case KnownSystemName::FMonitorH:
+          case KnownSystemName::Finish:
+          case KnownSystemName::Stop:
+          case KnownSystemName::Info:
+          case KnownSystemName::Warning:
+          case KnownSystemName::Error:
+          case KnownSystemName::Fatal:
+          case KnownSystemName::FOpen:
+          case KnownSystemName::FClose:
+          case KnownSystemName::FFlush:
+            std::cerr << "warning: ignoring non-synthesizable system call: " << call.getSubroutineName() << std::endl;
+            return;
+          case KnownSystemName::ReadMemB:
+          case KnownSystemName::ReadMemH:
+          case KnownSystemName::WriteMemB:
+          case KnownSystemName::WriteMemH:
+          default:
+            throw std::logic_error("Unsupported system call: " + std::string(call.getSubroutineName()));
+          }
         }
       }
       if (stmt.expr.kind != slang::ast::ExpressionKind::Assignment) {
@@ -636,6 +717,14 @@ namespace abys::ir {
 	cond_id = builder_.get_expr_builder().create_and(std::move(cond_ids));
       } else {
 	cond_id = cond_ids[0];
+      }
+      if (auto cond_value = builder_.get_expr_builder().try_evaluate(cond_id)) {
+        if (*cond_value) {
+          stmt.ifTrue.visit(*this);
+        } else if (stmt.ifFalse) {
+          stmt.ifFalse->visit(*this);
+        }
+        return;
       }
       builder_.create_context();
       stmt.ifTrue.visit(*this);
@@ -737,6 +826,10 @@ namespace abys::ir {
           assert(!assign.isNonBlocking());
           ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), special_symbols_);
           const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
+          const bool rhs_sign = builder_.get_expr_builder().get_sign(rhs_id);
+          const int rhs_value = builder_.get_expr_builder().evaluate(rhs_id); // TODO: sanitize type of this evaluate
+          const slang::SVInt rhs_sv(rhs_width, static_cast<uint64_t>(rhs_value), rhs_sign);
+          rhs_id = builder_.get_expr_builder().find_or_create_const(rhs_sv.toString(slang::LiteralBase::Binary), rhs_width, rhs_sign);
           lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), special_symbols_, [&](const std::string &output_name, ExprId expr_id) {
             builder_.get_expr_builder().update_value(output_name, expr_id);
             builder_.output_names().push_back(output_name);
@@ -1093,6 +1186,72 @@ namespace abys::ir {
 	}
 	
 	builder_.finalize_node_input(module_id, node_id);
+      }
+    }
+
+    void handle(const slang::ast::PrimitiveInstanceSymbol &symbol) {
+      const std::string_view primitive_name = symbol.primitiveType.name;
+      const auto ports = symbol.getPortConnections();
+      const bool multi_output_primitive = primitive_name == "buf" || primitive_name == "not";
+      const bool multi_input_primitive = primitive_name == "and" || primitive_name == "nand" ||
+        primitive_name == "or" || primitive_name == "nor" ||
+        primitive_name == "xor" || primitive_name == "xnor";
+      if (!multi_output_primitive && !multi_input_primitive) {
+        throw std::logic_error("Unsupported primitive instance: " + std::string(primitive_name));
+      }
+      const ModuleId module_id = current_module_id();
+      const NodeId node_id = builder_.create_operation(module_id);
+      ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
+      std::vector<const slang::ast::Expression *> outputs;
+      std::vector<ExprId> inputs;
+      if (multi_output_primitive) {
+        for (size_t i = 0; i + 1 < ports.size(); i++) {
+          outputs.push_back(ports[i]);
+        }
+        inputs.push_back(build_expr(*ports.back(), expr_builder, special_symbols_));
+      } else {
+        outputs.push_back(ports.front());
+        for (size_t i = 1; i < ports.size(); i++) {
+          inputs.push_back(build_expr(*ports[i], expr_builder, special_symbols_));
+        }
+      }
+      ExprId rhs_id = kInvalidExprId;
+      if (primitive_name == "buf") {
+        rhs_id = inputs.front();
+      } else if (primitive_name == "not") {
+        rhs_id = expr_builder.create_bitwise_not(inputs.front());
+      } else if (primitive_name == "and" || primitive_name == "nand") {
+        rhs_id = expr_builder.create_and(std::move(inputs));
+        if (primitive_name == "nand") {
+          rhs_id = expr_builder.create_bitwise_not(rhs_id);
+        }
+      } else if (primitive_name == "or" || primitive_name == "nor") {
+        rhs_id = expr_builder.create_or(std::move(inputs));
+        if (primitive_name == "nor") {
+          rhs_id = expr_builder.create_bitwise_not(rhs_id);
+        }
+      } else if (primitive_name == "xor" || primitive_name == "xnor") {
+        rhs_id = expr_builder.create_xor(std::move(inputs));
+        if (primitive_name == "xnor") {
+          rhs_id = expr_builder.create_bitwise_not(rhs_id);
+        }
+      }
+      assert(rhs_id != kInvalidExprId);
+      const SignalWidth rhs_width = expr_builder.get_width(rhs_id);
+      std::unordered_map<std::string, ExprId> to_store;
+      for (const auto *output : outputs) {
+        assert(output->kind == slang::ast::ExpressionKind::Assignment);
+        const auto &assign = output->as<slang::ast::AssignmentExpression>();
+        lower_lhs_assignment(assign.left(), rhs_id, rhs_width, expr_builder, special_symbols_, [&](const std::string &output_name, ExprId expr_id) {
+          expr_builder.update_value(output_name, expr_id);
+          to_store[output_name] = expr_id;
+        });
+      }
+      expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
+        builder_.add_node_input_spec(module_id, node_id, name, width, sign);
+      });
+      for (const auto &kv : to_store) {
+        builder_.add_node_output_expr(module_id, node_id, kv.first, kv.second, true);
       }
     }
 
