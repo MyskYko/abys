@@ -1011,36 +1011,17 @@ namespace abys::ir {
 			     );
     }
 
-    void handle(const slang::ast::DefParamSymbol &) {
-      // Defparams are elaboration-time parameter overrides. Slang has already
-      // applied them to instance bodies by the time lowering runs.
-    }
-
     void handle(const slang::ast::SpecifyBlockSymbol &) {
-      // Specify blocks describe simulation timing paths/checks; ignore for synthesis lowering.
     }
 
-    // TODO: not sure the following two symbols are okay to be just transparent
-    void handle(const slang::ast::TransparentMemberSymbol &symbol) {
-      this->visitDefault(symbol);
+    void handle(const slang::ast::DefParamSymbol &) {
     }
 
-    void handle(const slang::ast::StatementBlockSymbol &symbol) {
-      this->visitDefault(symbol);
+    void handle(const slang::ast::GenvarSymbol &) {
+      // TODO: I think it's fine to ignore and cleanup unused signal later
     }
 
-    void handle(const slang::ast::ParameterSymbol &symbol) {
-      const auto* init = symbol.getInitializer();
-      if (!init) {
-        throw std::logic_error("Parameter without initializer: " + std::string(symbol.name));
-      }
-      const ModuleId module_id = current_module_id();
-      const NodeId node_id = builder_.create_operation(module_id);
-      ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
-      const ExprId expr_id = build_expr(*init, expr_builder, special_symbols_);
-      builder_.add_node_output_expr(module_id, node_id, register_symbol_name(symbol, special_symbols_), expr_id, true);
-      create_variable(symbol, false);
-      // TODO: probably we want parameters directly assigned as a constant, by passing a list to expr builder
+    void handle(const slang::ast::ParameterSymbol &) {
     }
     
     void handle(const slang::ast::PortSymbol &symbol) {
@@ -1386,6 +1367,17 @@ namespace abys::ir {
       builder_.add_subroutine(std::move(subr)); // add API
     }
 
+    void handle(const slang::ast::StatementBlockSymbol &symbol) {
+      std::string suffix = suffix_;
+      if (suffix_.empty()) {
+        suffix_ = "_abys";
+      }
+      // TODO: maybe generate a random signature when symbol.name.empty()
+      suffix_ += "_" + std::string(symbol.name);
+      this->visitDefault(symbol);
+      suffix_ = suffix;
+    }
+ 
     void handle(const slang::ast::GenerateBlockSymbol &symbol) {
       if (symbol.isUninstantiated) {
         return;
@@ -1410,8 +1402,13 @@ namespace abys::ir {
     void handle(const slang::ast::GenerateBlockArraySymbol &symbol) {
       this->visitDefault(symbol);
     }
+
+    void handle(const slang::ast::TransparentMemberSymbol &symbol) {
+      this->visitDefault(symbol);
+    }
+    
   };
-  
+    
   template <typename Builder>
   void lower_slang_ast_to_ir(const slang::ast::RootSymbol &root, Builder &builder) {
     SlangLoweringVisitor<Builder> visitor(builder);
