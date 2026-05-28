@@ -516,28 +516,28 @@ namespace abys::ir {
     return id;
   }
   
-  ExprId ExprBuilder::assign_select(ExprId data, ExprId index, std::string_view name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
-    ExprId current = get_current_value(name);
+  ExprId ExprBuilder::assign_select(ExprId current, ExprId next, ExprId index, BitIndex msb, BitIndex lsb) {
+    const auto &node = get_node(current);
     ExprId pos = normalize_index_expr(index, msb, lsb);
-    return create_masked_assign(current, data, pos, get_constant_one(), width, sign);
+    return create_masked_assign(current, next, pos, get_constant_one(), node.width, node.sign);
   }
-  ExprId ExprBuilder::assign_range(ExprId data, BitIndex left, BitIndex right, std::string_view name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
-    ExprId current = get_current_value(name);
+  ExprId ExprBuilder::assign_range(ExprId current, ExprId next, BitIndex left, BitIndex right, BitIndex msb, BitIndex lsb) {
+    const auto &node = get_node(current);
     BitIndex left_pos = normalize_index(left, msb, lsb);
     BitIndex right_pos = normalize_index(right, msb, lsb);
     if (left_pos < right_pos) {
-      data = create_reverse(data);
+      next = create_reverse(next);
       std::swap(left_pos, right_pos);
     }
     ExprId left_id = find_or_create_const(left_pos);
     ExprId width_id = find_or_create_const(left_pos - right_pos + 1);
-    return create_masked_assign(current, data, left_id, width_id, width, sign);
+    return create_masked_assign(current, next, left_id, width_id, node.width, node.sign);
   }
-  ExprId ExprBuilder::assign_part_select(ExprId data, ExprId base, SignalWidth slice_width, bool dir, std::string_view name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb) {
-    ExprId current = get_current_value(name);
+  ExprId ExprBuilder::assign_part_select(ExprId current, ExprId next, ExprId base, SignalWidth slice_width, bool dir, BitIndex msb, BitIndex lsb) {
+    const auto &node = get_node(current);
     ExprId left = base;
     if (dir) {
-      data = create_reverse(data);
+      next = create_reverse(next);
       assert(slice_width > 0);
       // TODO: not sure about bitwidth and signedness
       const ExprId offset = find_or_create_const(slice_width - 1);
@@ -545,7 +545,7 @@ namespace abys::ir {
     }
     ExprId pos = normalize_index_expr(left, msb, lsb);
     ExprId width_id = find_or_create_const(slice_width);
-    return create_masked_assign(current, data, pos, width_id, width, sign);
+    return create_masked_assign(current, next, pos, width_id, node.width, node.sign);
   }
 
   ExprId ExprBuilder::create_call(const void *subr_ptr, std::string name, std::vector<ExprId> operands, SignalWidth width, bool sign) {

@@ -84,9 +84,9 @@ namespace abys::ir {
     ExprId create_gather(std::vector<ExprId> operands);
     ExprId create_masked_assign(ExprId current, ExprId next, ExprId base, ExprId slice_width, SignalWidth width, bool sign);
     
-    ExprId assign_select(ExprId data, ExprId index, std::string_view name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
-    ExprId assign_range(ExprId data, BitIndex left, BitIndex right, std::string_view name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
-    ExprId assign_part_select(ExprId data, ExprId base, SignalWidth slice_width, bool dir, std::string_view name, SignalWidth width, bool sign, BitIndex msb, BitIndex lsb);
+    ExprId assign_select(ExprId current, ExprId next, ExprId index, BitIndex msb, BitIndex lsb);
+    ExprId assign_range(ExprId current, ExprId next, BitIndex left, BitIndex right, BitIndex msb, BitIndex lsb);
+    ExprId assign_part_select(ExprId current, ExprId next, ExprId base, SignalWidth slice_width, bool dir, BitIndex msb, BitIndex lsb);
 
     ExprId create_array_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb, SignalWidth width, bool sign);
 

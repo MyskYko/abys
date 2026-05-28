@@ -240,7 +240,7 @@ namespace abys::ir {
         ExprId id = builder_.create_array_select(data, index, range.left, range.right, width, sign);
         expr_stack_.push_back(id);
       } else {
-        auto range = type.getFixedRange();
+        const auto range = type.getFixedRange();
         const ExprId id = builder_.create_select(data, index, range.left, range.right);
         expr_stack_.push_back(id);
       } 
@@ -486,28 +486,27 @@ namespace abys::ir {
     expr.visit(expr_visitor);
     return expr_visitor.get_root();
   }
-
-  void get_width_sign_range(const slang::ast::Type &type, SignalWidth &width, bool &sign, slang::ConstantRange &range) {
-    if (type.isUnpackedArray()) {
-      const auto &ct = type.getCanonicalType();
-      if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
-        throw std::logic_error("Unsupported dynamic size unpacked array");
-      }
-      const auto &arr = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
-      range = arr.range;
-      width = (range.left >= range.right) ? (range.left - range.right + 1) : (range.right - range.left + 1);
-      sign = false;
-    } else {
-      range = type.getFixedRange();
-      width = type.getBitstreamWidth();
-      sign = type.isSigned();
-    }
-  }
     
   template <typename EmitFn>
   void lower_lhs_assignment(const slang::ast::Expression &whole_lhs, ExprId rhs_id, SignalWidth rhs_width, ExprBuilder &expr_builder, std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols, EmitFn &&record) {
     assert(rhs_width > 0);
     BitIndex remaining = rhs_width;
+
+    auto extract_lhs_base_name = [&](auto &&self, const slang::ast::Expression &lhs) -> std::string {
+      if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
+        return extract_named_value(lhs, special_symbols);
+      }
+      if (lhs.kind == slang::ast::ExpressionKind::ElementSelect) {
+        const auto &sel = lhs.as<slang::ast::ElementSelectExpression>();
+        return self(self, sel.value());
+      }
+      if (lhs.kind == slang::ast::ExpressionKind::RangeSelect) {
+        const auto &sel = lhs.as<slang::ast::RangeSelectExpression>();
+        return self(self, sel.value());
+      }
+      throw std::logic_error("Unsupported LHS");
+    };
+
     auto get_rhs_id = [&](const slang::ast::Expression &lhs) -> ExprId {
       ExprId expr_id = rhs_id;
       SignalWidth width;
@@ -522,71 +521,76 @@ namespace abys::ir {
       remaining -= width;
       return expr_id;
     };
+    
+    auto get_range = [](const slang::ast::Type &type) -> slang::ConstantRange {
+      if (type.isUnpackedArray()) {
+        const auto &ct = type.getCanonicalType();
+        if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+          throw std::logic_error("Unsupported dynamic size unpacked array");
+        }
+        return ct.as<slang::ast::FixedSizeUnpackedArrayType>().range;
+      }
+      return type.getFixedRange();
+    };
+
+    auto masked_assign_rec = [&](auto &&self, const slang::ast::Expression &lhs, ExprId expr_id) -> ExprId {
+      if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
+        return expr_id;
+      }
+      if (lhs.kind == slang::ast::ExpressionKind::ElementSelect) {
+        const auto &sel = lhs.as<slang::ast::ElementSelectExpression>();
+        ExprId current_id = build_expr(sel.value(), expr_builder, special_symbols);
+        ExprId index_id = build_expr(sel.selector(), expr_builder, special_symbols);
+        slang::ConstantRange range = get_range(*sel.value().type);
+        ExprId updated_current_id = expr_builder.assign_select(current_id, expr_id, index_id, range.left, range.right);
+        return self(self, sel.value(), updated_current_id);
+      }
+      if (lhs.kind == slang::ast::ExpressionKind::RangeSelect) {
+        const auto &sel = lhs.as<slang::ast::RangeSelectExpression>();
+        ExprId current_id = build_expr(sel.value(), expr_builder, special_symbols);
+        slang::ConstantRange range = get_range(*sel.value().type);
+        const auto kind = sel.getSelectionKind();
+        ExprId updated_current_id = kInvalidExprId;
+        if (kind == slang::ast::RangeSelectionKind::Simple) {
+          updated_current_id = expr_builder.assign_range(current_id, expr_id, extract_constant_index(sel.left()), extract_constant_index(sel.right()), range.left, range.right);
+        } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
+                   kind == slang::ast::RangeSelectionKind::IndexedDown) {
+          const SignalWidth slice_width = extract_constant_index(sel.right());
+          const ExprId base = build_expr(sel.left(), expr_builder, special_symbols);
+          const bool dir = kind == slang::ast::RangeSelectionKind::IndexedUp;
+          updated_current_id = expr_builder.assign_part_select(current_id, expr_id, base, slice_width, dir, range.left, range.right);
+        } else {
+          throw std::logic_error("Unsupported range selection kind");
+        }
+        return self(self, sel.value(), updated_current_id);
+      }
+      throw std::logic_error("Unsupported LHS");
+    };
+
     std::vector<const slang::ast::Expression*> lhs_stack{&whole_lhs};
     bool in_concat = false;
     while (!lhs_stack.empty()) {
       const slang::ast::Expression &lhs = *lhs_stack.back();
       lhs_stack.pop_back();
-      std::string output_name;
-      ExprId expr_id = kInvalidExprId;
-      if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
-        expr_id = get_rhs_id(lhs);
-        if (in_concat) {
-          SignalWidth width;
-          bool sign;
-          get_width_sign(*lhs.type, width, sign);
-          if (expr_builder.get_sign(expr_id) != sign) {
-            expr_id = expr_builder.create_convert(expr_id, width, sign);
-          }
-        }
-        output_name = extract_named_value(lhs, special_symbols);
-      } else if (lhs.kind == slang::ast::ExpressionKind::ElementSelect) {
-        expr_id = get_rhs_id(lhs);
-        const auto &sel = lhs.as<slang::ast::ElementSelectExpression>();
-        output_name = extract_named_value(sel.value(), special_symbols);
-        const ExprId index_id = build_expr(sel.selector(), expr_builder, special_symbols);
-        const auto &type = *sel.value().type;
-        SignalWidth width;
-        bool sign;
-        slang::ConstantRange range;
-        get_width_sign_range(type, width, sign, range);
-        expr_id = expr_builder.assign_select(expr_id, index_id, output_name, width, sign, range.left, range.right);
-      } else if (lhs.kind == slang::ast::ExpressionKind::RangeSelect) {
-        expr_id = get_rhs_id(lhs);
-        const auto &sel = lhs.as<slang::ast::RangeSelectExpression>();
-        output_name = extract_named_value(sel.value(), special_symbols);
-        const auto kind = sel.getSelectionKind();
-        const auto &left = sel.left();
-        const auto &right = sel.right();
-        const auto &type = *sel.value().type;
-        SignalWidth width;
-        bool sign;
-        slang::ConstantRange range;
-        get_width_sign_range(type, width, sign, range);
-        if (kind == slang::ast::RangeSelectionKind::Simple) {
-          const BitIndex left_sw = extract_constant_index(left);
-          const BitIndex right_sw = extract_constant_index(right);
-          expr_id = expr_builder.assign_range(expr_id, left_sw, right_sw, output_name, width, sign, range.left, range.right);
-        } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
-                   kind == slang::ast::RangeSelectionKind::IndexedDown) {
-          const BitIndex slice_width = extract_constant_index(right);
-          assert(slice_width >= 0);
-          const ExprId base_id = build_expr(left, expr_builder, special_symbols);
-          const bool dir = (kind == slang::ast::RangeSelectionKind::IndexedUp);
-          expr_id = expr_builder.assign_part_select(expr_id, base_id, slice_width, dir, output_name, width, sign, range.left, range.right);
-        } else {
-          throw std::logic_error("Unsupported range selection kind");
-        }
-      } else if (lhs.kind == slang::ast::ExpressionKind::Concatenation) {
+      if (lhs.kind == slang::ast::ExpressionKind::Concatenation) {
         const auto &cat = lhs.as<slang::ast::ConcatenationExpression>();
         for (auto it = cat.operands().rbegin(); it != cat.operands().rend(); ++it) {
           lhs_stack.push_back(*it);
         }
         in_concat = true;
         continue;
-      } else {
-        throw std::logic_error("Unsupported LHS");
       }
+      std::string output_name = extract_lhs_base_name(extract_lhs_base_name, lhs);
+      ExprId expr_id = get_rhs_id(lhs);
+      if (in_concat) {
+        SignalWidth width;
+        bool sign;
+        get_width_sign(*lhs.type, width, sign);
+        if (expr_builder.get_sign(expr_id) != sign) {
+          expr_id = expr_builder.create_convert(expr_id, width, sign);
+        }
+      }
+      expr_id = masked_assign_rec(masked_assign_rec, lhs, expr_id);
       record(output_name, expr_id);
     }
     assert(remaining == 0);

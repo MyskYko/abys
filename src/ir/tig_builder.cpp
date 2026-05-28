@@ -406,6 +406,10 @@ namespace abys::ir {
               id_map.emplace(constant.id, dst_id);
             }
           }
+          const auto return_input_it = subr.expr_graph.inputs.find(subr.name);
+          if (return_input_it != subr.expr_graph.inputs.end()) {
+            id_map.emplace(return_input_it->second, kInvalidExprId);
+          }
           for (ExprId src_id = 0; src_id < static_cast<ExprId>(subr.expr_graph.nodes.size()); src_id++) {
             if (id_map.find(src_id) != id_map.end()) {
               continue;
