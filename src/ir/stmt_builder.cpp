@@ -122,14 +122,19 @@ namespace abys::ir {
     output_ids().push_back(expr_id);
   }
 
-  std::vector<size_t> StmtBuilder::collect_last_output_indices(const Context &ctx) {
+  std::vector<size_t> StmtBuilder::collect_last_output_indices(Context &ctx) {
     std::unordered_map<std::string, size_t> last_index;
     for (size_t i = 0; i < ctx.output_names.size(); i++) {
       const std::string &name = ctx.output_names[i];
       auto it = last_index.find(name);
       if (it != last_index.end()) {
         if (ctx.output_nonblocking[it->second] != ctx.output_nonblocking[i]) {
-          throw std::logic_error("Mixed blocking and nonblocking assignments to " + name);
+          if (!is_ff()) {
+            throw std::logic_error("Mixed blocking and nonblocking assignments to " + name);
+          }
+          std::cerr << "warning: treating mixed blocking/nonblocking assignments as nonblocking for " << name << std::endl;
+          ctx.output_nonblocking[it->second] = true;
+          ctx.output_nonblocking[i] = true;
         }
         it->second = i;
       } else {
@@ -190,7 +195,12 @@ namespace abys::ir {
 	ExprId else_id = else_ctx.output_ids[it->second];
 	new_id = expr_builder.create_mux(cond_id, then_id, else_id);
 	if (then_ctx.output_nonblocking[i] != else_ctx.output_nonblocking[it->second]) {
-	  throw std::logic_error("Mixed blocking/nonblocking assignments to " + name);
+	  if (!is_ff()) {
+	    throw std::logic_error("Mixed blocking/nonblocking assignments to " + name);
+	  }
+	  std::cerr << "warning: treating mixed blocking/nonblocking assignments as nonblocking for " << name << std::endl;
+	  then_ctx.output_nonblocking[i] = true;
+	  else_ctx.output_nonblocking[it->second] = true;
 	}
       } else {
 	// not shared

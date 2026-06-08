@@ -354,7 +354,10 @@ namespace abys::ir {
           set_node_input(module_id, static_cast<NodeId>(node_id), static_cast<PortIndex>(i), it->second);
         } else {
           Signal input = get_node_input(module_id, static_cast<NodeId>(node_id), static_cast<PortIndex>(i));
-          assert(input.node_id != kInvalidNodeId);
+          if (input.node_id == kInvalidNodeId) {
+            // TODO: unassigned inputs is currently handled here
+            continue;
+          }
         }
       }
     }

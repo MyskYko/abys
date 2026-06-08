@@ -1102,7 +1102,12 @@ namespace abys::ir {
 	  assert(port.direction != slang::ast::ArgumentDirection::Ref);
 	  const slang::ast::Expression *expr = conn->getExpression();
 	  if (port.direction == slang::ast::ArgumentDirection::In) {
-            assert(expr);
+            if (!expr) {
+              std::cerr << "warning: leaving unconnected input port: " << symbol.name << "." << port.name << "\n";
+              builder_.add_node_input(module_id, node_id, Builder::kInvalidNodeId);
+              // TODO: think of a better way of handling this
+              continue;
+            }
 	    if (expr->kind != slang::ast::ExpressionKind::NamedValue) {
 	      const NodeId input_id = create_expr_node(*expr);
 	      builder_.add_node_input(module_id, node_id, input_id);

@@ -111,7 +111,7 @@ namespace abys::ir {
     std::vector<Context> context_stack_;
 
     void transfer_output(const Context &from, size_t i, ExprId expr_id);
-    std::vector<size_t> collect_last_output_indices(const Context &ctx);
+    std::vector<size_t> collect_last_output_indices(Context &ctx);
     
     struct TimingEvent {
       EdgeKind edge = EdgeKind::kNone;
