@@ -328,7 +328,11 @@ namespace abys::ir {
       const ExprId next = node.operands[1];
       const ExprId base = node.operands[2];
       const ExprId slice_width = node.operands[3];
-      emit_expr(lhs, false, expr_graph, current, os, indent); // turn off nonblocking to permit cascaded masked assigns
+      std::ostringstream current_ss;
+      emit_expr_rec(expr_graph, current, "", current_ss);
+      if (current_ss.str() != lhs) {
+        emit_expr(lhs, false, expr_graph, current, os, indent); // turn off nonblocking to permit cascaded masked assigns
+      }
       std::ostringstream ss;
       ss << lhs << "[";
       emit_expr_rec(expr_graph, base, "", ss);
