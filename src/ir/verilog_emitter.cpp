@@ -3,6 +3,7 @@
 #include <unordered_set>
 #include <map>
 #include <sstream>
+#include <vector>
 
 #include "abys/ir/verilog_emitter.h"
 
@@ -249,12 +250,13 @@ namespace abys::ir {
       const auto &clk_ref = node.inputs[1];
       const auto &clk_node = module.nodes[clk_ref.node_id];
       const std::string clk_name = clk_node.outputs[clk_ref.port_idx].name;
+      std::string rst_name;
       // TODO: bothedge
       os << "  always @(" << edge_to_string(node.clk_edge) << " " << clk_name;
       if (node.inputs.size() == 3) {
         const auto &rst_ref = node.inputs[2];
         const auto &rst_node = module.nodes[rst_ref.node_id];
-        const std::string rst_name = rst_node.outputs[rst_ref.port_idx].name;
+        rst_name = rst_node.outputs[rst_ref.port_idx].name;
         os << " or " << edge_to_string(node.rst_edge) << " " << rst_name;
       }
       os << ") begin\n";
@@ -263,12 +265,16 @@ namespace abys::ir {
           assert(data_ref.port_idx < data_node.expr_roots.size());
           emit_expr(lhs_name, true, data_node.expr_graph, data_node.expr_roots[data_ref.port_idx], os, "    ");
         } else if (data_node.kind == Module::NodeKind::kMerge) {
-          for (const auto &input : data_node.inputs) {
-            const auto &input_node = module.nodes[input.node_id];
-            assert(input.node_id < module.nodes.size());
-            assert(input_node.kind == Module::NodeKind::kOp);
-            assert(input.port_idx < input_node.expr_roots.size());
-            emit_expr(lhs_name, true, input_node.expr_graph, input_node.expr_roots[input.port_idx], os, "    ");
+          if (!rst_name.empty()) {
+            emit_reset_mux_merge(lhs_name, module, data_node, rst_name, node.rst_edge, os, "    ");
+          } else {
+            for (const auto &input : data_node.inputs) {
+              const auto &input_node = module.nodes[input.node_id];
+              assert(input.node_id < module.nodes.size());
+              assert(input_node.kind == Module::NodeKind::kOp);
+              assert(input.port_idx < input_node.expr_roots.size());
+              emit_expr(lhs_name, true, input_node.expr_graph, input_node.expr_roots[input.port_idx], os, "    ");
+            }
           }
         }
       } else {
@@ -276,6 +282,39 @@ namespace abys::ir {
       }
       os << "  end\n";
     }
+  }
+
+  void VerilogEmitter::emit_reset_mux_merge(std::string_view lhs, const Module &module, const Module::Node &merge_node, std::string_view rst_name, EdgeKind rst_edge, std::ostream &os, std::string_view indent) const {
+    struct ResetMuxBranches {
+      const ExprGraph *expr_graph;
+      ExprId on_reset_id;
+      ExprId on_clock_id;
+    };
+    std::vector<ResetMuxBranches> branches;
+    branches.reserve(merge_node.inputs.size());
+    const std::string expected_cond = (rst_edge == EdgeKind::kNegedge) ? "(!" + std::string(rst_name) + ")" : std::string(rst_name);
+    for (const auto &input : merge_node.inputs) {
+      const auto &input_node = module.nodes[input.node_id];
+      assert(input.node_id < module.nodes.size());
+      assert(input_node.kind == Module::NodeKind::kOp);
+      assert(input.port_idx < input_node.expr_roots.size());
+      const ExprId root_id = input_node.expr_roots[input.port_idx];
+      const auto &root = input_node.expr_graph.nodes[root_id];
+      assert(root.op == ExprGraph::Op::kMux);
+      std::ostringstream cond_ss;
+      emit_expr_rec(input_node.expr_graph, root.operands[0], "", cond_ss);
+      assert(cond_ss.str() == expected_cond);
+      branches.push_back({&input_node.expr_graph, root.operands[1], root.operands[2]});
+    }
+    os << indent << "if (" << ((rst_edge == EdgeKind::kNegedge) ? "!" : "") << rst_name << ") begin\n";
+    for (const auto &branch : branches) {
+      emit_expr(lhs, true, *branch.expr_graph, branch.on_reset_id, os, std::string(indent) + "  ");
+    }
+    os << indent << "end else begin\n";
+    for (const auto &branch : branches) {
+      emit_expr(lhs, true, *branch.expr_graph, branch.on_clock_id, os, std::string(indent) + "  ");
+    }
+    os << indent << "end\n";
   }
 
   void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id, std::ostream &os, std::string_view indent) const {
