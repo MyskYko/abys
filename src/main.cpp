@@ -4,7 +4,7 @@
 #include <vector>
 #include <fstream>
 
-#include "abys/frontend.h"
+#include "abys/frontend/api.h"
 #include "abys/version.h"
 #include "abys/ir/verilog_emitter.h"
 

@@ -1,5 +1,5 @@
-#include "abys/frontend.h"
-#include "abys/ir/lowering_slang.h"
+#include "abys/frontend/api.h"
+#include "abys/frontend/slang_lowering.h"
 #include "abys/ir/tig.h"
 #include "abys/ir/tig_builder.h"
 
@@ -98,7 +98,7 @@ ir::TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &
   if (top && !top->empty()) {
     builder.set_top_module(*top);
   }
-  ir::lower_slang_ast_to_ir(compilation->getRoot(), builder);
+  frontend::lower_slang_ast_to_ir(compilation->getRoot(), builder);
 
   return {true, "ok", std::move(design)};
 }

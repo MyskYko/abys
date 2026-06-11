@@ -28,7 +28,9 @@
 #include "abys/ir/stmt_builder.h"
 #include "abys/ir/tig_builder.h"
 
-namespace abys::ir {
+namespace abys::frontend {
+
+  using namespace abys::ir;
 
   static inline const char* definitionKindToString(slang::ast::DefinitionKind kind) {
     switch (kind) {
@@ -1425,4 +1427,4 @@ namespace abys::ir {
     builder.flatten_calls();
   }
   
-} // namespace abys::ir
+} // namespace abys::frontend

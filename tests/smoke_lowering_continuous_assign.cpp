@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-#include "abys/frontend.h"
+#include "abys/frontend/api.h"
 
 int main() {
   std::vector<std::string> files = {"../tests/fixtures/and_gate.sv"};
