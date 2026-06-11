@@ -17,8 +17,7 @@ void add_default_translate_off_formats(slang::driver::Driver &driver) {
 
 } // namespace
 
-ParseResult parse_systemverilog(const std::vector<std::string> &files,
-                                const std::optional<std::string> &top) {
+ParseResult parse_systemverilog(const std::vector<std::string> &files, const std::optional<std::string> &top) {
   if (files.empty()) {
     return {false, "no input files provided"};
   }
@@ -56,8 +55,7 @@ ParseResult parse_systemverilog(const std::vector<std::string> &files,
   return {true, "ok"};
 }
 
-ir::TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &files,
-                                                const std::optional<std::string> &top) {
+ir::TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &files, const std::optional<std::string> &top) {
   ir::Tig design;
 
   if (files.empty()) {

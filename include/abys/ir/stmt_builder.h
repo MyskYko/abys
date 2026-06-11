@@ -50,9 +50,7 @@ namespace abys::ir {
     void merge_case(ExprId selector_id, const std::vector<ExprId> &case_values, size_t stack_index);
 
     // API for exporting info for creating a tig node
-    void get_timing_spec(const std::vector<std::pair<std::string, ExprId>> &outputs,
-                         std::string &clk_name, SignalWidth &clk_width, bool &clk_sign, EdgeKind &clk_edge,
-                         std::string &rst_name, SignalWidth &rst_width, bool &rst_sign, EdgeKind &rst_edge) const;
+    void get_timing_spec(const std::vector<std::pair<std::string, ExprId>> &outputs, std::string &clk_name, SignalWidth &clk_width, bool &clk_sign, EdgeKind &clk_edge, std::string &rst_name, SignalWidth &rst_width, bool &rst_sign, EdgeKind &rst_edge) const;
     
     template<typename Func>
     void for_each_input(Func &&func) const {

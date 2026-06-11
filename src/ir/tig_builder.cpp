@@ -54,8 +54,7 @@ namespace abys::ir {
     return module_id;
   }
 
-  TigBuilder::NodeId TigBuilder::create_module_input(ModuleId module_id, std::string name,
-                                                     SignalWidth width, bool sign) {
+  TigBuilder::NodeId TigBuilder::create_module_input(ModuleId module_id, std::string name, SignalWidth width, bool sign) {
     Module &module = design_.modules[module_id];
     module.input_ports.emplace_back(name, width, sign);
     NodeId node_id = create_node(module_id, NodeKind::kPi);
@@ -65,12 +64,7 @@ namespace abys::ir {
     return node_id;
   }
 
-  TigBuilder::NodeId TigBuilder::create_module_output(ModuleId module_id, std::string name,
-                                                      SignalWidth width, bool sign,
-                                                      std::string input_name,
-                                                      SignalWidth input_width,
-                                                      bool input_sign, NodeId input_id,
-                                                      PortIndex port_idx) {
+  TigBuilder::NodeId TigBuilder::create_module_output(ModuleId module_id, std::string name, SignalWidth width, bool sign, std::string input_name, SignalWidth input_width, bool input_sign, NodeId input_id, PortIndex port_idx) {
     Module &module = design_.modules[module_id];
     module.output_ports.emplace_back(name, width, sign);
     NodeId node_id = create_node(module_id, NodeKind::kPo);
@@ -106,8 +100,7 @@ namespace abys::ir {
     module.packed_variables.push_back({kind, std::move(name), std::move(dims), width, sign});
   }
 
-  TigBuilder::NodeId TigBuilder::create_instance(ModuleId module_id, std::string name,
-                                                 ModuleId instance_module_id) {
+  TigBuilder::NodeId TigBuilder::create_instance(ModuleId module_id, std::string name, ModuleId instance_module_id) {
     Module &module = design_.modules[module_id];
     NodeId node_id = create_node(module_id, NodeKind::kInstance);
     Node &node = module.nodes[node_id];
@@ -455,15 +448,13 @@ namespace abys::ir {
     }
   }
   
-  void TigBuilder::set_node_input(ModuleId module_id, NodeId node_id, PortIndex port_idx,
-                                  Signal input) {
+  void TigBuilder::set_node_input(ModuleId module_id, NodeId node_id, PortIndex port_idx, Signal input) {
     Module &module = design_.modules[module_id];
     Node &node = module.nodes[node_id];
     node.inputs[port_idx] = input;
   }
 
-  TigBuilder::Signal TigBuilder::get_node_input(ModuleId module_id, NodeId node_id,
-                                                PortIndex port_idx) {
+  TigBuilder::Signal TigBuilder::get_node_input(ModuleId module_id, NodeId node_id, PortIndex port_idx) {
     Module &module = design_.modules[module_id];
     const Node &node = module.nodes[node_id];
     return node.inputs[port_idx];
