@@ -7,6 +7,16 @@
 
 namespace abys {
 
+namespace {
+
+void add_default_translate_off_formats(slang::driver::Driver &driver) {
+  driver.options.translateOffOptions.push_back("synopsys,translate_off,translate_on");
+  driver.options.translateOffOptions.push_back("synthesis,translate_off,translate_on");
+  driver.options.translateOffOptions.push_back("pragma,translate_off,translate_on");
+}
+
+} // namespace
+
 ParseResult parse_systemverilog(const std::vector<std::string> &files,
                                 const std::optional<std::string> &top) {
   if (files.empty()) {
@@ -15,6 +25,7 @@ ParseResult parse_systemverilog(const std::vector<std::string> &files,
 
   slang::driver::Driver driver;
   driver.addStandardArgs();
+  add_default_translate_off_formats(driver);
 
   for (const auto &file : files) {
     driver.sourceLoader.addFiles(file);
@@ -55,6 +66,7 @@ ir::TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &
 
   slang::driver::Driver driver;
   driver.addStandardArgs();
+  add_default_translate_off_formats(driver);
 
   for (const auto &file : files) {
     driver.sourceLoader.addFiles(file);
