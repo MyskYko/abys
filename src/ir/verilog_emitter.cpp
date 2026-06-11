@@ -127,7 +127,7 @@ namespace abys::ir {
       const std::string inst = node.name;
       os << "  " << child.name << " " << inst << " (\n";
       bool first = true;
-      for (size_t i = 0; i < child.input_ports.size(); i++) {
+      for (size_t i = 0; i < child.input_ports.size(); ++i) {
         if (!first) {
           os << ",\n";
         }
@@ -149,7 +149,7 @@ namespace abys::ir {
         }
         os << ")";
       }
-      for (size_t i = 0; i < child.output_ports.size(); i++) {
+      for (size_t i = 0; i < child.output_ports.size(); ++i) {
         if (!first) {
           os << ",\n";
         }
@@ -169,7 +169,7 @@ namespace abys::ir {
       if (node.kind == Module::NodeKind::kOp) {
         assert(node.outputs.size() == node.expr_roots.size());
         bool fEmpty = true;
-        for (size_t i = 0; i < node.outputs.size(); i++) {
+        for (size_t i = 0; i < node.outputs.size(); ++i) {
           if (!node.outputs[i].name.empty()) {
             fEmpty = false;
             break;
@@ -179,7 +179,7 @@ namespace abys::ir {
           continue;
         }
         os << "  always @(*) begin\n";
-        for (size_t i = 0; i < node.outputs.size(); i++) {
+        for (size_t i = 0; i < node.outputs.size(); ++i) {
           if (!node.outputs[i].name.empty()) { // skip convert (already handled above)
             emit_expr(node.outputs[i].name, false, node.expr_graph, node.expr_roots[i], os, "    ");
           }
@@ -229,7 +229,7 @@ namespace abys::ir {
         }
       }
     }
-    for (Tig::NodeId ff_id = 0; ff_id < module.nodes.size(); ff_id++) {
+    for (Tig::NodeId ff_id = 0; ff_id < module.nodes.size(); ++ff_id) {
       const auto &node = module.nodes[ff_id];
       if (node.kind != Module::NodeKind::kFf) {
         continue;
@@ -363,7 +363,7 @@ namespace abys::ir {
         os << indent;
         const auto &value_node = expr_graph.nodes[node.operands[i]];
         if (value_node.op == ExprGraph::Op::kList) {
-          for (size_t k = 0; k < value_node.operands.size(); k++) {
+          for (size_t k = 0; k < value_node.operands.size(); ++k) {
             if (k) {
               os << ", ";
             }
@@ -501,7 +501,7 @@ namespace abys::ir {
     case ExprGraph::Op::kXor: {
       const char *op = (node.op == ExprGraph::Op::kAnd) ? "&" : (node.op == ExprGraph::Op::kOr)  ? "|" : "^";
       os << "(";
-      for (size_t i = 0; i < node.operands.size(); i++) {
+      for (size_t i = 0; i < node.operands.size(); ++i) {
         if (i) {
           os << " " << op << " ";
         }
@@ -526,7 +526,7 @@ namespace abys::ir {
         const auto &v = expr_graph.nodes[value_id];
         if (v.op == ExprGraph::Op::kList) {
           os << "(";
-          for (size_t k = 0; k < v.operands.size(); k++) {
+          for (size_t k = 0; k < v.operands.size(); ++k) {
             if (k) {
               os << " || ";
             }
@@ -580,7 +580,7 @@ namespace abys::ir {
     }
     case ExprGraph::Op::kConcat:
       os << "{";
-      for (size_t i = 0; i < node.operands.size(); i++) {
+      for (size_t i = 0; i < node.operands.size(); ++i) {
         if (i) {
           os << ", ";
         }
@@ -596,7 +596,7 @@ namespace abys::ir {
         return;
       }
       os << "{";
-      for (SignalWidth i = 0; i < op_node.width; i++) {
+      for (SignalWidth i = 0; i < op_node.width; ++i) {
         if (i != 0) {
           os << ", ";
         }
@@ -623,7 +623,7 @@ namespace abys::ir {
       return;
     case ExprGraph::Op::kGather: {
       os << "'{";
-      for (size_t i = 0; i < node.operands.size(); i++) {
+      for (size_t i = 0; i < node.operands.size(); ++i) {
         if (i) {
           os << ", ";
         }

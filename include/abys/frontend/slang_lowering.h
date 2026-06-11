@@ -210,7 +210,7 @@ namespace abys::frontend {
       this->visitDefault(expr);
       const size_t n = expr_stack_.size() - index;
       std::vector<ExprId> operands(n);
-      for (size_t i = 0; i < n; i++) {
+      for (size_t i = 0; i < n; ++i) {
         operands[n - 1 - i] = expr_stack_.back();
         expr_stack_.pop_back();
       }
@@ -290,7 +290,7 @@ namespace abys::frontend {
       this->visitDefault(expr);
       const size_t n = expr_stack_.size() - index;
       std::vector<ExprId> operands(n);
-      for (size_t i = 0; i < n; i++) {
+      for (size_t i = 0; i < n; ++i) {
         operands[n - 1 - i] = expr_stack_.back();
         expr_stack_.pop_back();
       }
@@ -307,7 +307,7 @@ namespace abys::frontend {
       expr_stack_.pop_back();
       std::vector<ExprId> operands;
       operands.reserve(rep);
-      for (size_t i = 0; i < static_cast<size_t>(rep); i++) {
+      for (size_t i = 0; i < static_cast<size_t>(rep); ++i) {
         operands.push_back(body);
       }
       expr_stack_.push_back(builder_.create_concat(std::move(operands), expr_sign(expr)));
@@ -467,7 +467,7 @@ namespace abys::frontend {
       this->visitDefault(expr);
       const size_t n = expr_stack_.size() - index;
       std::vector<ExprId> operands(n);
-      for (size_t i = 0; i < n; i++) {
+      for (size_t i = 0; i < n; ++i) {
         operands[n - 1 - i] = expr_stack_.back(); // restore original element order
         expr_stack_.pop_back();
       }
@@ -807,7 +807,7 @@ namespace abys::frontend {
           builder_.output_ids().push_back(expr_id);
         });
       }
-      for (size_t iter = 0; ; iter++) {
+      for (size_t iter = 0; ; ++iter) {
         // TODO: warn if this iterates too many times
         if (!stmt.stopExpr) {
           // TODO: handle break/continue
@@ -1197,13 +1197,13 @@ namespace abys::frontend {
       std::vector<const slang::ast::Expression *> outputs;
       std::vector<ExprId> inputs;
       if (multi_output_primitive) {
-        for (size_t i = 0; i + 1 < ports.size(); i++) {
+        for (size_t i = 0; i + 1 < ports.size(); ++i) {
           outputs.push_back(ports[i]);
         }
         inputs.push_back(build_expr(*ports.back(), expr_builder, special_symbols_));
       } else {
         outputs.push_back(ports.front());
-        for (size_t i = 1; i < ports.size(); i++) {
+        for (size_t i = 1; i < ports.size(); ++i) {
           inputs.push_back(build_expr(*ports[i], expr_builder, special_symbols_));
         }
       }

@@ -270,7 +270,7 @@ namespace abys::ir {
       module.nodes[it->second.node_id].outputs[it->second.port_idx].name.clear();
       size_t end = begin + 1;
       while (end < pending_ffs.size() && pending_ffs[end].name == pending_ffs[begin].name) {
-        end++;
+        ++end;
       }
       if (begin + 1 == end) {
         it->second = create_ff(pending_ffs[begin], it->second, spec, true);
@@ -278,7 +278,7 @@ namespace abys::ir {
         continue;
       }
       std::vector<std::vector<size_t>> clusters;
-      for (size_t i = begin; i < end; i++) {
+      for (size_t i = begin; i < end; ++i) {
         bool f = false;
         for (auto &cluster : clusters) {
           if (same_ff_props(pending_ffs[i], pending_ffs[cluster.front()])) {
@@ -330,9 +330,9 @@ namespace abys::ir {
   
   void TigBuilder::wire_connections(ModuleId module_id) {
     Module &module = design_.modules[module_id];
-    for (size_t node_id = 0; node_id < input_specs[module_id].size(); node_id++) {
+    for (size_t node_id = 0; node_id < input_specs[module_id].size(); ++node_id) {
       auto &specs = input_specs[module_id][node_id];
-      for (size_t i = 0; i < specs.size(); i++) {
+      for (size_t i = 0; i < specs.size(); ++i) {
         const std::string &name = specs[i].name;
         if (!name.empty()) {
           const auto it = module.signal_map.find(name);
@@ -363,13 +363,13 @@ namespace abys::ir {
   void TigBuilder::flatten_calls() {
     std::unordered_map<const void*, size_t> subr_map;
     subr_map.reserve(design_.subroutines.size());
-    for (size_t i = 0; i < design_.subroutines.size(); i++) {
+    for (size_t i = 0; i < design_.subroutines.size(); ++i) {
       subr_map.emplace(design_.subroutines[i].subr_ptr, i);
     }
     for (auto &module : design_.modules) {
       for (auto &node : module.nodes) {
         ExprGraph &expr_graph = node.expr_graph;
-        for (size_t i = 0; i < expr_graph.calls.size(); i++) {
+        for (size_t i = 0; i < expr_graph.calls.size(); ++i) {
           auto subr_it = subr_map.find(expr_graph.calls[i].subr_ptr);
           if (subr_it == subr_map.end()) {
             throw std::logic_error("Unknown subroutine: " + expr_graph.calls[i].name);
@@ -382,7 +382,7 @@ namespace abys::ir {
           std::unordered_map<ExprId, ExprId> id_map;
           id_map.reserve(subr.expr_graph.nodes.size() + 1);
           id_map.emplace(kInvalidExprId, kInvalidExprId);
-          for (size_t j = 0; j < subr.inputs.size(); j++) {
+          for (size_t j = 0; j < subr.inputs.size(); ++j) {
             const auto input_it = subr.expr_graph.inputs.find(subr.inputs[j].name);
             if (input_it == subr.expr_graph.inputs.end()) {
               throw std::logic_error("Subroutine input not found: " + subr.inputs[j].name);
@@ -406,7 +406,7 @@ namespace abys::ir {
           if (return_input_it != subr.expr_graph.inputs.end()) {
             id_map.emplace(return_input_it->second, kInvalidExprId);
           }
-          for (ExprId src_id = 0; src_id < static_cast<ExprId>(subr.expr_graph.nodes.size()); src_id++) {
+          for (ExprId src_id = 0; src_id < static_cast<ExprId>(subr.expr_graph.nodes.size()); ++src_id) {
             if (id_map.find(src_id) != id_map.end()) {
               continue;
             }

@@ -124,7 +124,7 @@ namespace abys::ir {
 
   std::vector<size_t> StmtBuilder::collect_last_output_indices(Context &ctx) {
     std::unordered_map<std::string, size_t> last_index;
-    for (size_t i = 0; i < ctx.output_names.size(); i++) {
+    for (size_t i = 0; i < ctx.output_names.size(); ++i) {
       const std::string &name = ctx.output_names[i];
       auto it = last_index.find(name);
       if (it != last_index.end()) {
@@ -143,7 +143,7 @@ namespace abys::ir {
     }
     std::vector<size_t> indices;
     indices.reserve(last_index.size());
-    for (size_t i = 0; i < ctx.output_names.size(); i++) {
+    for (size_t i = 0; i < ctx.output_names.size(); ++i) {
       if (last_index[ctx.output_names[i]] == i) {
         indices.push_back(i);
       }
@@ -231,16 +231,16 @@ namespace abys::ir {
     std::unordered_map<std::string, size_t> output_map;
     std::vector<std::vector<ExprId>> case_output_ids;
     std::vector<std::vector<bool>> case_output_nonblocking;
-    for (size_t j = 0; j < context_stack_.size() - stack_index; j++) {
+    for (size_t j = 0; j < context_stack_.size() - stack_index; ++j) {
       const Context &ctx = context_stack_[j + stack_index];
-      for (size_t i = 0; i < ctx.output_names.size(); i++) {
+      for (size_t i = 0; i < ctx.output_names.size(); ++i) {
 	const std::string &name = ctx.output_names[i];
 	auto it = output_map.find(name);
 	size_t output_index;
 	if (it == output_map.end()) {
 	  output_index = output_count;
 	  output_map[name] = output_count;
-	  output_count++;
+	  ++output_count;
 	  case_output_nonblocking.resize(output_count);
 	  case_output_ids.resize(output_count);
 	} else {
@@ -259,7 +259,8 @@ namespace abys::ir {
       bool nonblocking;
       case_output_ids[entry.second].resize(context_stack_.size() - stack_index, kInvalidExprId);
       case_output_nonblocking[entry.second].resize(context_stack_.size() - stack_index, false);
-      for (size_t j = 0; j < case_output_ids[entry.second].size(); j++) {
+      const size_t branch_count = case_output_ids[entry.second].size();
+      for (size_t j = 0; j < branch_count; ++j) {
 	if (case_output_ids[entry.second][j] != kInvalidExprId) {
 	  if (is_first) {
 	    nonblocking = case_output_nonblocking[entry.second][j];
@@ -303,7 +304,7 @@ namespace abys::ir {
       get_input_spec(0, input_id, clk_name, clk_width, clk_sign, clk_edge);
       return;
     } else {
-      for (int i = 0; i < 2; i++) {
+      for (int i = 0; i < 2; ++i) {
         // TODO: check if rst is used only as an if-cond for debugging
         ExprId input_id;
         std::string name;

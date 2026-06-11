@@ -370,7 +370,7 @@ namespace abys::ir {
     node.op = ExprGraph::Op::kCase;
     node.operands.push_back(selector);
     bool is_first = true;
-    for (size_t i = 0; i < data_ids.size(); i++) {
+    for (size_t i = 0; i < data_ids.size(); ++i) {
       if (i < case_values.size()) {
         node.operands.push_back(case_values[i]);
       }
@@ -410,7 +410,7 @@ namespace abys::ir {
     node.sign = sign;
     for (ExprId operand : operands) {
       if (operand == kInvalidExprId) {
-        node.width++;
+        ++node.width;
       } else {
         const auto &operand_node = get_node(operand);
         node.width += operand_node.width;
@@ -649,7 +649,7 @@ namespace abys::ir {
           return std::nullopt;
         }
         if (s[pos + 1] == 's') {
-          pos++;
+          ++pos;
         }
         if (s[pos + 1] != 'b') {
           return std::nullopt;
@@ -678,7 +678,7 @@ namespace abys::ir {
       if (!opr) {
         return std::nullopt;
       }
-      for (SignalWidth i = 0; i < op_node.width; i++) {
+      for (SignalWidth i = 0; i < op_node.width; ++i) {
         if (((*opr >> i) & 1) == 0) {
           return 0;
         }
@@ -692,7 +692,7 @@ namespace abys::ir {
       if (!opr) {
         return std::nullopt;
       }
-      for (SignalWidth i = 0; i < op_node.width; i++) {
+      for (SignalWidth i = 0; i < op_node.width; ++i) {
         if ((*opr >> i) & 1) {
           return 1;
         }
@@ -707,7 +707,7 @@ namespace abys::ir {
         return std::nullopt;
       }
       int value = 0;
-      for (SignalWidth i = 0; i < op_node.width; i++) {
+      for (SignalWidth i = 0; i < op_node.width; ++i) {
         value ^= (*opr >> i) & 1;
       }
       return value;
@@ -727,7 +727,7 @@ namespace abys::ir {
       if (!value) {
         return std::nullopt;
       }
-      for (size_t i = 1; i < node.operands.size(); i++) {
+      for (size_t i = 1; i < node.operands.size(); ++i) {
         auto opr = try_evaluate(node.operands[i]);
         if (!opr) {
           return std::nullopt;
@@ -788,7 +788,7 @@ namespace abys::ir {
       }
       int shifted = *value;
       int mask = shifted & (1 << (node.width - 1));
-      for (int i = 0; i < *shamt; i++) {
+      for (int i = 0; i < *shamt; ++i) {
         shifted = (shifted >> 1) | mask;
       }
       return shifted;
@@ -833,7 +833,7 @@ namespace abys::ir {
         assert(pos != std::string::npos);
         assert(s[pos + 1] == 's' || s[pos + 1] == 'b');
         if (s[pos + 1] == 's') {
-          pos++;
+          ++pos;
         }
         assert(s[pos + 1] == 'b');
         pos += 2;
@@ -857,7 +857,7 @@ namespace abys::ir {
       const ExprId op_id = node.operands[0];
       const auto &op_node = graph_.nodes[op_id];
       int opr = evaluate(op_id);
-      for (SignalWidth i = 0; i < op_node.width; i++) {
+      for (SignalWidth i = 0; i < op_node.width; ++i) {
         if (((opr >> i) & 1) == 0) {
           return 0;
         }
@@ -868,7 +868,7 @@ namespace abys::ir {
       const ExprId op_id = node.operands[0];
       const auto &op_node = graph_.nodes[op_id];
       int opr = evaluate(op_id);
-      for (SignalWidth i = 0; i < op_node.width; i++) {
+      for (SignalWidth i = 0; i < op_node.width; ++i) {
         if ((opr >> i) & 1) {
           return 1;
         }
@@ -880,7 +880,7 @@ namespace abys::ir {
       const auto &op_node = graph_.nodes[op_id];
       int opr = evaluate(op_id);
       int value = 0;
-      for (SignalWidth i = 0; i < op_node.width; i++) {
+      for (SignalWidth i = 0; i < op_node.width; ++i) {
         value ^= (opr >> i) & 1;
       }
       return value;
@@ -915,7 +915,7 @@ namespace abys::ir {
       int value = evaluate(node.operands[0]);
       int shamt = evaluate(node.operands[1]);
       int mask = value & (1 << (node.width - 1));
-      for (int i = 0; i < shamt; i++) {
+      for (int i = 0; i < shamt; ++i) {
         value = (value >> 1) | mask;
       }
       return value;
