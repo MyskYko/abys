@@ -23,7 +23,9 @@
 #include "slang/ast/types/Type.h"
 #include "slang/driver/Driver.h"
 #include "slang/parsing/KnownSystemName.h"
+#include "slang/syntax/AllSyntax.h"
 
+#include "abys/frontend/slang_pragma.h"
 #include "abys/ir/expr_builder.h"
 #include "abys/ir/stmt_builder.h"
 #include "abys/ir/tig_builder.h"
@@ -604,9 +606,10 @@ namespace abys::frontend {
   private:
     Builder &builder_;
     std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols_;
+    const PragmaMap &pragmas_;
 
   public:
-    explicit SlangStmtLoweringVisitor(Builder &builder, std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols) : builder_(builder), special_symbols_(special_symbols) {}
+    explicit SlangStmtLoweringVisitor(Builder &builder, std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols, const PragmaMap &pragmas) : builder_(builder), special_symbols_(special_symbols), pragmas_(pragmas) {}
 
     template<typename T>
     void handle(const T&) {
@@ -768,7 +771,16 @@ namespace abys::frontend {
 	stmt.defaultCase->visit(*this);
       }
       builder_.stack_context();
-      builder_.merge_case(case_id, case_values, index);
+      bool full_case = false;
+      if (stmt.syntax) {
+        auto it = pragmas_.by_node.find(static_cast<const slang::syntax::SyntaxNode *>(stmt.syntax));
+        full_case = it != pragmas_.by_node.end() && it->second.full_case;
+      }
+      if (full_case && stmt.defaultCase) {
+        std::cerr << "warning: ignoring full_case on case statement with default\n";
+      }
+      // TODO: propagate parallel_case
+      builder_.merge_case(case_id, case_values, index, full_case && !stmt.defaultCase);
     }
 
     void handle(const slang::ast::ForLoopStatement& stmt) {
@@ -921,6 +933,7 @@ namespace abys::frontend {
     using SignalSpec = typename Builder::SignalSpec;
 
     Builder &builder_;
+    const PragmaMap &pragmas_;
 
     std::vector<ModuleId> module_stack_;
     std::unordered_map<const slang::ast::InstanceBodySymbol *, ModuleId> module_ids_;
@@ -990,7 +1003,7 @@ namespace abys::frontend {
     }
 
   public:
-    explicit SlangLoweringVisitor(Builder &builder) : builder_(builder) {}
+    explicit SlangLoweringVisitor(Builder &builder, const PragmaMap &pragmas) : builder_(builder), pragmas_(pragmas) {}
 
   private:
     std::string extract_output_named_value(const slang::ast::Expression &expr) {
@@ -1321,7 +1334,7 @@ namespace abys::frontend {
       default:
         throw std::logic_error("Unknown procedural block kind");
       }
-      SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder, special_symbols_);
+      SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder, special_symbols_, pragmas_);
       const slang::ast::Statement& stmt = symbol.getBody();
       stmt.visit(stmt_visitor);
       stmt_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
@@ -1368,7 +1381,7 @@ namespace abys::frontend {
         subr.inputs.emplace_back(Tig::Subroutine::Port{std::string(arg->name), type.getBitstreamWidth(), type.isSigned()});
       }
       StmtBuilder stmt_builder(subr.expr_graph);
-      SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder, special_symbols_);
+      SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder, special_symbols_, pragmas_);
       symbol.getBody().visit(stmt_visitor);
       const ExprId ret = stmt_builder.get_expr_builder().get_current_value(symbol.name);
       if (ret == kInvalidExprId) {
@@ -1421,10 +1434,16 @@ namespace abys::frontend {
   };
     
   template <typename Builder>
-  void lower_slang_ast_to_ir(const slang::ast::RootSymbol &root, Builder &builder) {
-    SlangLoweringVisitor<Builder> visitor(builder);
+  void lower_slang_ast_to_ir(const slang::ast::RootSymbol &root, Builder &builder, const PragmaMap &pragmas) {
+    SlangLoweringVisitor<Builder> visitor(builder, pragmas);
     root.visit(visitor);
     builder.flatten_calls();
+  }
+
+  template <typename Builder>
+  void lower_slang_ast_to_ir(const slang::ast::RootSymbol &root, Builder &builder) {
+    const PragmaMap pragmas;
+    lower_slang_ast_to_ir(root, builder, pragmas);
   }
   
 } // namespace abys::frontend

@@ -1,5 +1,6 @@
 #include "abys/frontend/api.h"
 #include "abys/frontend/slang_lowering.h"
+#include "abys/frontend/slang_pragma.h"
 #include "abys/ir/tig.h"
 #include "abys/ir/tig_builder.h"
 
@@ -10,9 +11,9 @@ namespace abys {
 namespace {
 
 void add_default_translate_off_formats(slang::driver::Driver &driver) {
-  driver.options.translateOffOptions.push_back("synopsys,translate_off,translate_on");
-  driver.options.translateOffOptions.push_back("synthesis,translate_off,translate_on");
-  driver.options.translateOffOptions.push_back("pragma,translate_off,translate_on");
+  for (std::string_view prefix : frontend::kSynthesisPragmaPrefixes) {
+    driver.options.translateOffOptions.push_back(std::string(prefix) + ",translate_off,translate_on");
+  }
 }
 
 } // namespace
@@ -51,6 +52,8 @@ ParseResult parse_systemverilog(const std::vector<std::string> &files, const std
   if (driver.diagEngine.getNumErrors() > 0) {
     return {false, "slang reported compilation errors"};
   }
+
+  (void)frontend::collect_pragmas(driver);
 
   return {true, "ok"};
 }
@@ -96,7 +99,8 @@ ir::TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &
   if (top && !top->empty()) {
     builder.set_top_module(*top);
   }
-  frontend::lower_slang_ast_to_ir(compilation->getRoot(), builder);
+  frontend::PragmaMap pragmas = frontend::collect_pragmas(driver);
+  frontend::lower_slang_ast_to_ir(compilation->getRoot(), builder, pragmas);
 
   return {true, "ok", std::move(design)};
 }

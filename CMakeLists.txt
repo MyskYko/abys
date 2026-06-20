@@ -22,6 +22,7 @@ endif()
 set(ABYS_CORE_SOURCES
   src/version.cpp
   src/frontend/slang.cpp
+  src/frontend/slang_pragma.cpp
   src/ir/expr_builder.cpp
   src/ir/stmt_builder.cpp
   src/ir/tig_builder.cpp

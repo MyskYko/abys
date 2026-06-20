@@ -226,7 +226,7 @@ namespace abys::ir {
     }
   }
 
-  void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case_values, size_t stack_index) {
+  void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case_values, size_t stack_index, bool full_case) {
     size_t output_count = 0;
     std::unordered_map<std::string, size_t> output_map;
     std::vector<std::vector<ExprId>> case_output_ids;
@@ -268,9 +268,14 @@ namespace abys::ir {
 	  } else {
 	    assert(nonblocking == case_output_nonblocking[entry.second][j]);
 	  }
-	} else {
+	} else if (!full_case || j + 1 != branch_count) {
           case_output_ids[entry.second][j] = current_id;
         }
+      }
+      if (full_case) {
+        assert(case_output_ids[entry.second].size() == case_values.size() + 1);
+        case_output_ids[entry.second].pop_back();
+        case_output_nonblocking[entry.second].pop_back();
       }
       assert(!is_first);
       ExprId new_id = expr_builder.create_case(selector_id, case_values, std::move(case_output_ids[entry.second]));
