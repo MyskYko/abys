@@ -43,6 +43,7 @@ namespace abys::ir {
     explicit TigBuilder(Tig &design);
     void set_top_module(std::string name);
     std::string generate_temporary_name();
+    std::string create_temporary_signal(ModuleId module_id, SignalWidth width, bool sign);
     
     ModuleId create_module(std::string name);
 

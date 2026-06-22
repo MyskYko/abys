@@ -58,7 +58,7 @@ namespace abys::ir {
     }
 
     template<typename Func>
-    void for_each_output(Func &&func) const {
+    void for_each_output(Func &&func) {
       assert(!is_undecided()); // we don't allow always without any timing
       struct OutputInfo {
 	ExprId expr_id = 0;
@@ -71,6 +71,13 @@ namespace abys::ir {
 	const auto &name = const_output_names()[i];
 	const bool nonblocking = const_output_nonblocking()[i];
 	auto &entry = info[name];
+        if (entry.seen_nonblocking) {
+          ExprGraph::Node &node = get_expr_builder().get_node(const_output_ids()[i]);
+          if (node.op == ExprGraph::Op::kMaskedAssign) {
+            // TODO: handle two-sided conditional masked updates, e.g. if (c) a[0] <= 1; else a[1] <= 1;.
+            node.operands[0] = entry.expr_id;
+          }
+        }
 	entry.expr_id = const_output_ids()[i];
 	entry.seen_blocking |= !nonblocking;
 	entry.seen_nonblocking |= nonblocking;
@@ -108,6 +115,7 @@ namespace abys::ir {
     std::vector<Context> contexts_;
     std::vector<Context> context_stack_;
 
+    ExprId create_conditional_masked_assign(ExprBuilder &expr_builder, ExprId cond_id, ExprId masked_id, ExprId current_id, bool then_updates) const;
     void transfer_output(const Context &from, size_t i, ExprId expr_id);
     std::vector<size_t> collect_last_output_indices(Context &ctx);
     

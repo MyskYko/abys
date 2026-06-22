@@ -111,7 +111,7 @@ namespace abys::ir {
       }
       os << var.name;
       for (SignalWidth width : var.dims) {
-        os << " [0:" << (width - 1) << "]";
+        os << " [" << (width - 1) << ":0]";
       }
       os << ";\n";
     }
@@ -337,7 +337,7 @@ namespace abys::ir {
       ss << lhs << "[";
       emit_expr_rec(expr_graph, base, "", ss);
       if (slice_width != expr_graph.constant_one) {
-        ss << " +: ";
+        ss << " -: ";
         emit_expr_rec(expr_graph, slice_width, "", ss);
       }
       ss << "]";
@@ -355,9 +355,14 @@ namespace abys::ir {
       return;
     case ExprGraph::Op::kCase: {
       assert(!node.operands.empty());
+      const bool has_default = node.operands.size() % 2 == 0;
       os << indent << "case (";
       emit_expr_rec(expr_graph, node.operands[0], lhs, os);
-      os << ")\n";
+      os << ")";
+      if (!has_default) {
+        os << " // synopsys full_case";
+      }
+      os << "\n";
       size_t i = 1;
       while (i + 1 < node.operands.size()) {
         os << indent;

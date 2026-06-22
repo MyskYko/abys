@@ -113,6 +113,26 @@ namespace abys::ir {
     contexts_.pop_back();    
   }
 
+  ExprId StmtBuilder::create_conditional_masked_assign(ExprBuilder &expr_builder, ExprId cond_id, ExprId masked_id, ExprId current_id, bool then_updates) const {
+    const auto &masked = expr_builder.get_node(masked_id);
+    if (masked.op != ExprGraph::Op::kMaskedAssign) {
+      return kInvalidExprId;
+    }
+    if (current_id == kInvalidExprId) {
+      current_id = masked.operands[0];
+    }
+    assert(current_id != kInvalidExprId);
+    assert(masked.operands[0] == current_id);
+    const ExprId next_id = masked.operands[1];
+    const ExprId base_id = masked.operands[2];
+    const ExprId slice_width_id = masked.operands[3];
+    const auto &current = expr_builder.get_node(current_id);
+    const SignalWidth slice_width = static_cast<SignalWidth>(expr_builder.evaluate(slice_width_id));
+    const ExprId fallback_id = expr_builder.create_part_select(current_id, base_id, slice_width, false, static_cast<BitIndex>(current.width - 1), 0);
+    const ExprId conditional_next_id = then_updates ? expr_builder.create_mux(cond_id, next_id, fallback_id) : expr_builder.create_mux(cond_id, fallback_id, next_id);
+    return expr_builder.create_masked_assign(current_id, conditional_next_id, base_id, slice_width_id, masked.width, masked.sign);
+  }
+
   void StmtBuilder::transfer_output(const Context &from, size_t i, ExprId expr_id) {
     if (!from.output_nonblocking[i]) {
       get_expr_builder().update_value(from.output_names[i], expr_id);
@@ -128,6 +148,11 @@ namespace abys::ir {
       const std::string &name = ctx.output_names[i];
       auto it = last_index.find(name);
       if (it != last_index.end()) {
+        ExprGraph::Node &node = ctx.expr_builder.get_node(ctx.output_ids[i]);
+        if (ctx.output_nonblocking[it->second] && node.op == ExprGraph::Op::kMaskedAssign) {
+          // TODO: handle two-sided conditional masked updates, e.g. if (c) a[0] <= 1; else a[1] <= 1;.
+          node.operands[0] = ctx.output_ids[it->second];
+        }
         if (ctx.output_nonblocking[it->second] != ctx.output_nonblocking[i]) {
           if (!is_ff()) {
             throw std::logic_error("Mixed blocking and nonblocking assignments to " + name);
@@ -206,7 +231,10 @@ namespace abys::ir {
 	// not shared
 	ExprId then_id = then_ctx.output_ids[i];
 	ExprId else_id = expr_builder.get_current_value(name);
-	new_id = expr_builder.create_mux(cond_id, then_id, else_id);
+	new_id = create_conditional_masked_assign(expr_builder, cond_id, then_id, else_id, true);
+	if (new_id == kInvalidExprId) {
+	  new_id = expr_builder.create_mux(cond_id, then_id, else_id);
+	}
       }
       assert(new_id != kInvalidExprId);
       transfer_output(then_ctx, i, new_id);
@@ -221,12 +249,16 @@ namespace abys::ir {
       // not shared
       ExprId then_id = expr_builder.get_current_value(name);
       ExprId else_id = else_ctx.output_ids[i];
-      ExprId new_id = expr_builder.create_mux(cond_id, then_id, else_id);
+      ExprId new_id = create_conditional_masked_assign(expr_builder, cond_id, else_id, then_id, false);
+      if (new_id == kInvalidExprId) {
+        new_id = expr_builder.create_mux(cond_id, then_id, else_id);
+      }
       transfer_output(else_ctx, i, new_id);
     }
   }
 
   void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case_values, size_t stack_index, bool full_case) {
+    // TODO: handle conditional masked updates across case items, similar to partial assignments in if/else branches.
     size_t output_count = 0;
     std::unordered_map<std::string, size_t> output_map;
     std::vector<std::vector<ExprId>> case_output_ids;

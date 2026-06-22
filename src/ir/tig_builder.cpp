@@ -21,6 +21,12 @@ namespace abys::ir {
   std::string TigBuilder::generate_temporary_name() {
     return std::string("abys_temporary_") +std::to_string(design_.temporary_name_count++);
   }
+
+  std::string TigBuilder::create_temporary_signal(ModuleId module_id, SignalWidth width, bool sign) {
+    std::string name = generate_temporary_name();
+    create_variable(module_id, name, width, sign, true, false);
+    return name;
+  }
   
   TigBuilder::NodeId TigBuilder::create_node(ModuleId module_id, NodeKind kind) {
     Module &module = design_.modules[module_id];

@@ -1147,7 +1147,7 @@ namespace abys::frontend {
               assert(assign.right().kind == slang::ast::ExpressionKind::Conversion);
               const auto &conv = assign.right().as<slang::ast::ConversionExpression>();
               assert(conv.operand().kind == slang::ast::ExpressionKind::EmptyArgument);
-              const std::string temporary_name = builder_.generate_temporary_name();
+              const std::string temporary_name = builder_.create_temporary_signal(module_id, rhs_width, rhs_sign);
               const PortIndex port_idx = builder_.add_node_output(module_id, node_id, temporary_name, rhs_width, rhs_sign);
               output_node_id = builder_.create_operation(module_id);
               ExprBuilder expr_builder(builder_.get_expr_graph(module_id, output_node_id));
@@ -1165,7 +1165,7 @@ namespace abys::frontend {
                 builder_.add_node_output_expr(module_id, output_node_id, output_name, output_expr_id, true);
               }
             } else {
-              const std::string temporary_name = builder_.generate_temporary_name();
+              const std::string temporary_name = builder_.create_temporary_signal(module_id, rhs_width, rhs_sign);
               PortIndex port_idx;
               if (output_expr_id == kInvalidExprId) {
                 port_idx = builder_.add_node_output(module_id, output_node_id, temporary_name, rhs_width, rhs_sign);
