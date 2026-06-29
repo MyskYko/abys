@@ -91,7 +91,7 @@ void StmtBuilder::add_timing(ExprId expr_id, ExprId iff_id, bool posedge, bool n
   if (edge_kind == EdgeKind::kNone) {
     if (!is_comb_or_latch() && !is_undecided()) {
       std::cerr << "warning: ignoring level-sensitive event in edge-sensitive procedural block"
-                << std::endl;
+                << '\n';
       return;
     }
     set_comb_or_latch();
@@ -166,7 +166,7 @@ std::vector<size_t> StmtBuilder::collect_last_output_indices(Context &ctx) {
           throw std::logic_error("Mixed blocking and nonblocking assignments to " + name);
         }
         std::cerr << "warning: treating mixed blocking/nonblocking assignments as nonblocking for "
-                  << name << std::endl;
+                  << name << '\n';
         ctx.output_nonblocking[it->second] = true;
         ctx.output_nonblocking[i] = true;
       }
@@ -234,7 +234,7 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
           throw std::logic_error("Mixed blocking/nonblocking assignments to " + name);
         }
         std::cerr << "warning: treating mixed blocking/nonblocking assignments as nonblocking for "
-                  << name << std::endl;
+                  << name << '\n';
         then_ctx.output_nonblocking[i] = true;
         else_ctx.output_nonblocking[it->second] = true;
       }

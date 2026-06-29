@@ -358,6 +358,7 @@ ExprId ExprBuilder::create_match(ExprId selector, ExprId case_value) {
   const auto &case_value_node = get_node(case_value);
   if (case_value_node.op == ExprGraph::Op::kList) {
     std::vector<ExprId> eqs;
+    eqs.reserve(case_value_node.operands.size());
     for (ExprId list_item : case_value_node.operands) {
       eqs.push_back(create_eq(selector, list_item));
     }

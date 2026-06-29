@@ -4,6 +4,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <typeinfo>
 #include <unordered_map>
 #include <vector>
@@ -68,7 +69,7 @@ lower_symbol_name(const slang::ast::Symbol &symbol,
 std::string
 register_symbol_name(const slang::ast::Symbol &symbol,
                      std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols,
-                     std::string suffix = "") {
+                     std::string_view suffix = "") {
   std::string name = std::string(symbol.name);
   name += suffix;
   special_symbols[&symbol] = name;
@@ -218,7 +219,7 @@ public:
       case KnownSystemName::TestPlusArgs:
       case KnownSystemName::ValuePlusArgs:
         std::cerr << "warning: replacing non-synthesizable system function with zero: "
-                  << expr.getSubroutineName() << std::endl;
+                  << expr.getSubroutineName() << '\n';
         expr_stack_.push_back(builder_.find_or_create_const(
             std::to_string(expr_width(expr)) + "'b0", expr_width(expr), expr_sign(expr)));
         return;
@@ -710,7 +711,7 @@ public:
         case KnownSystemName::FClose:
         case KnownSystemName::FFlush:
           std::cerr << "warning: ignoring non-synthesizable system call: "
-                    << call.getSubroutineName() << std::endl;
+                    << call.getSubroutineName() << '\n';
           return;
         case KnownSystemName::ReadMemB:
         case KnownSystemName::ReadMemH:
@@ -1351,8 +1352,7 @@ public:
     if (symbol.procedureKind == slang::ast::ProceduralBlockKind::Initial ||
         symbol.procedureKind == slang::ast::ProceduralBlockKind::Final) {
       std::cerr << "warning: ignoring procedural block: "
-                << slang::ast::SemanticFacts::getProcedureKindStr(symbol.procedureKind)
-                << std::endl;
+                << slang::ast::SemanticFacts::getProcedureKindStr(symbol.procedureKind) << '\n';
       return;
     }
     const ModuleId module_id = current_module_id();
