@@ -14,7 +14,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcovr
+          sudo apt-get install -y gcovr gdb
       - name: Cache slang (prebuilt)
         uses: actions/cache@v4
         with:
@@ -38,7 +38,12 @@ jobs:
       - name: Build
         run: cmake --build build
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: |
+          if ! ctest --test-dir build --output-on-failure; then
+            cd build
+            gdb -batch -ex run -ex bt --args ./abys_smoke_lowering_continuous_assign
+            exit 1
+          fi
       - name: Coverage report
         run: |
           gcovr -r . --xml -o build/coverage.xml
