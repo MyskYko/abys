@@ -95,7 +95,8 @@ public:
       }
     }
     if (!syntax.items.empty()) {
-      for (const auto &trivia : syntax.items[0]->getFirstToken().trivia()) {
+      const slang::parsing::Token first_token = syntax.items[0]->getFirstToken();
+      for (const auto &trivia : first_token.trivia()) {
         if (trivia.kind == slang::parsing::TriviaKind::EndOfLine) {
           break;
         }
