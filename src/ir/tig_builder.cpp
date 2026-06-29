@@ -15,7 +15,7 @@ namespace abys::ir {
 TigBuilder::TigBuilder(Tig &design) : design_(design) {}
 
 void TigBuilder::set_top_module(std::string name) {
-  design_.top_module_name = name;
+  design_.top_module_name = std::move(name);
 }
 
 std::string TigBuilder::generate_temporary_name() {
@@ -38,7 +38,7 @@ TigBuilder::NodeId TigBuilder::create_node(ModuleId module_id, NodeKind kind) {
 
 void TigBuilder::add_signal(ModuleId module_id, std::string name, Signal signal) {
   Module &module = design_.modules[module_id];
-  auto [it, inserted] = module.signal_map.emplace(std::move(name), std::move(signal));
+  auto [it, inserted] = module.signal_map.emplace(std::move(name), signal);
   assert(inserted);
   (void)it;
 }
@@ -63,10 +63,10 @@ TigBuilder::ModuleId TigBuilder::create_module(std::string name) {
 TigBuilder::NodeId TigBuilder::create_module_input(ModuleId module_id, std::string name,
                                                    SignalWidth width, bool sign) {
   Module &module = design_.modules[module_id];
-  module.input_ports.emplace_back(name, width, sign);
+  module.input_ports.push_back({name, width, sign});
   NodeId node_id = create_node(module_id, NodeKind::kPi);
   Node &node = module.nodes[node_id];
-  node.outputs.emplace_back(name, width, sign);
+  node.outputs.push_back({name, width, sign});
   add_signal(module_id, std::move(name), {node_id, 0});
   return node_id;
 }
@@ -77,13 +77,13 @@ TigBuilder::NodeId TigBuilder::create_module_output(ModuleId module_id, std::str
                                                     bool input_sign, NodeId input_id,
                                                     PortIndex port_idx) {
   Module &module = design_.modules[module_id];
-  module.output_ports.emplace_back(name, width, sign);
+  module.output_ports.push_back({std::move(name), width, sign});
   NodeId node_id = create_node(module_id, NodeKind::kPo);
   Node &node = module.nodes[node_id];
   if (!input_name.empty()) {
     add_input_spec(module_id, node_id, {std::move(input_name), input_width, input_sign});
   }
-  node.inputs.emplace_back(input_id, port_idx);
+  node.inputs.push_back({input_id, port_idx});
   return node_id;
 }
 
@@ -152,7 +152,7 @@ void TigBuilder::add_node_input(ModuleId module_id, NodeId node_id, NodeId input
                                 PortIndex port_idx) {
   Module &module = design_.modules[module_id];
   Node &node = module.nodes[node_id];
-  node.inputs.emplace_back(input_id, port_idx);
+  node.inputs.push_back({input_id, port_idx});
   add_input_spec(module_id, node_id, {"", 0, false});
 }
 
@@ -202,7 +202,7 @@ PortIndex TigBuilder::add_node_output(ModuleId module_id, NodeId node_id, std::s
         }
         NodeId merge_id = create_merge(module_id); // current_node may be invalidated here
         Node &merge_node = module.nodes[merge_id];
-        merge_node.outputs.emplace_back(std::move(name), width, sign);
+        merge_node.outputs.push_back({std::move(name), width, sign});
         merge_node.expr_roots.push_back(kInvalidExprId);
         merge_node.combs.push_back(false);
         add_node_input(module_id, merge_id, it->second.node_id, it->second.port_idx);
@@ -215,7 +215,7 @@ PortIndex TigBuilder::add_node_output(ModuleId module_id, NodeId node_id, std::s
     }
   }
   Node &node = module.nodes[node_id];
-  node.outputs.emplace_back(std::move(final_name), width, sign);
+  node.outputs.push_back({std::move(final_name), width, sign});
   node.expr_roots.push_back(expr_id);
   node.combs.push_back(comb);
   return port_idx;
@@ -272,7 +272,7 @@ void TigBuilder::insert_ffs(ModuleId module_id) {
                           pending_ff.rst_spec.sign);
       ff_node.rst_edge = pending_ff.rst_edge;
     }
-    ff_node.outputs.emplace_back(named ? pending_ff.name : "", spec.width, spec.sign);
+    ff_node.outputs.push_back({named ? pending_ff.name : "", spec.width, spec.sign});
     ff_node.expr_roots.push_back(kInvalidExprId);
     ff_node.combs.push_back(false);
     return Signal{ff_id, 0};
@@ -328,7 +328,7 @@ void TigBuilder::insert_ffs(ModuleId module_id) {
             const auto &pending_ff = pending_ffs[i];
             add_node_input(module_id, merge_id, pending_ff.node_id, pending_ff.port_idx);
           }
-          merge_node.outputs.emplace_back("", spec.width, spec.sign);
+          merge_node.outputs.push_back({"", spec.width, spec.sign});
           merge_node.expr_roots.push_back(kInvalidExprId);
           merge_node.combs.push_back(false);
           signal = Signal{merge_id, 0};
@@ -340,7 +340,7 @@ void TigBuilder::insert_ffs(ModuleId module_id) {
       for (const auto &ff : ffs) {
         add_node_input(module_id, ff_merge_id, ff.node_id, ff.port_idx);
       }
-      ff_merge_node.outputs.emplace_back(pending_ffs[begin].name, spec.width, spec.sign);
+      ff_merge_node.outputs.push_back({pending_ffs[begin].name, spec.width, spec.sign});
       ff_merge_node.expr_roots.push_back(kInvalidExprId);
       ff_merge_node.combs.push_back(false);
       it->second = Signal{ff_merge_id, 0};
