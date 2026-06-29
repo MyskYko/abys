@@ -6,6 +6,10 @@ on:
       - main
   pull_request:
 
+env:
+  SLANG_RELEASE_TAG: slang-ubuntu-2026-06-29
+  SLANG_TARBALL_SHA256: 86b0eee26eaac399803ec1392bd2d96007d555d137466a066aaded69d30aa892
+
 jobs:
   coverage:
     runs-on: ubuntu-latest
@@ -19,7 +23,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: _slang
-          key: slang-ubuntu-2025-12-26
+          key: ${{ env.SLANG_RELEASE_TAG }}-${{ env.SLANG_TARBALL_SHA256 }}
       - name: Fetch slang (prebuilt)
         run: |
           if [ -d _slang/lib/cmake/slang ]; then
@@ -28,7 +32,7 @@ jobs:
           fi
           mkdir -p _slang
           curl -L -o slang-ubuntu-latest.tar.gz \
-            https://github.com/MyskYko/slang/releases/download/slang-ubuntu-2025-12-26/slang-ubuntu-latest.tar.gz
+            https://github.com/MyskYko/slang/releases/download/${SLANG_RELEASE_TAG}/slang-ubuntu-latest.tar.gz
           if [ -n "${SLANG_TARBALL_SHA256:-}" ]; then
             echo "${SLANG_TARBALL_SHA256}  slang-ubuntu-latest.tar.gz" | sha256sum --check
           fi
@@ -41,8 +45,14 @@ jobs:
         run: ctest --test-dir build --output-on-failure
       - name: Coverage report
         run: |
-          gcovr -r . --xml -o build/coverage.xml
-          gcovr -r . --html --html-details -o build/coverage.html
+          gcovr -r . \
+            --filter "$PWD/src/" \
+            --filter "$PWD/include/" \
+            --xml -o build/coverage.xml
+          gcovr -r . \
+            --filter "$PWD/src/" \
+            --filter "$PWD/include/" \
+            --html --html-details -o build/coverage.html
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
