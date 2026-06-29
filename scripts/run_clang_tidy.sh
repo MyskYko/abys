@@ -17,10 +17,10 @@ if [ ! -f "$compdb" ]; then
   exit 1
 fi
 
-files=$(git ls-files '*.h' '*.hpp' '*.cc' '*.cpp')
-if [ -z "$files" ]; then
+mapfile -t files < <(git ls-files 'src/*.cpp' 'src/**/*.cpp' 'tests/*.cpp' 'tests/**/*.cpp')
+if [ ${#files[@]} -eq 0 ]; then
   echo "No source files to lint."
   exit 0
 fi
 
-clang-tidy -p "$(dirname "$compdb")" $files
+clang-tidy -p "$(dirname "$compdb")" -header-filter="^$PWD/include/" --quiet "${files[@]}"

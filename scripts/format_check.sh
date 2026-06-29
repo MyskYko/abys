@@ -6,10 +6,10 @@ if ! command -v clang-format >/dev/null 2>&1; then
   exit 1
 fi
 
-files=$(git ls-files '*.h' '*.hpp' '*.cc' '*.cpp')
-if [ -z "$files" ]; then
+mapfile -t files < <(git ls-files '*.h' '*.hpp' '*.cc' '*.cpp')
+if [ ${#files[@]} -eq 0 ]; then
   echo "No source files to check."
   exit 0
 fi
 
-clang-format -n $files
+clang-format -n -Werror "${files[@]}"
