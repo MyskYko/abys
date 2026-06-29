@@ -50,8 +50,14 @@ jobs:
           fi
       - name: Coverage report
         run: |
-          gcovr -r . --xml -o build/coverage.xml
-          gcovr -r . --html --html-details -o build/coverage.html
+          gcovr -r . \
+            --filter "$PWD/src/" \
+            --filter "$PWD/include/" \
+            --xml -o build/coverage.xml
+          gcovr -r . \
+            --filter "$PWD/src/" \
+            --filter "$PWD/include/" \
+            --html --html-details -o build/coverage.html
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
