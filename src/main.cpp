@@ -1,12 +1,12 @@
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <vector>
-#include <fstream>
 
 #include "abys/frontend/api.h"
-#include "abys/version.h"
 #include "abys/ir/verilog_emitter.h"
+#include "abys/version.h"
 
 namespace {
 

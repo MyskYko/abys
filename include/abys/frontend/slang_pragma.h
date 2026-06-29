@@ -9,21 +9,21 @@
 
 namespace abys::frontend {
 
-  inline constexpr std::array<std::string_view, 3> kSynthesisPragmaPrefixes = {
+inline constexpr std::array<std::string_view, 3> kSynthesisPragmaPrefixes = {
     "synopsys",
     "synthesis",
     "pragma",
-  };
+};
 
-  struct PragmaInfo {
-    bool full_case = false;
-    bool parallel_case = false;
-  };
+struct PragmaInfo {
+  bool full_case = false;
+  bool parallel_case = false;
+};
 
-  struct PragmaMap {
-    std::unordered_map<const slang::syntax::SyntaxNode *, PragmaInfo> by_node;
-  };
+struct PragmaMap {
+  std::unordered_map<const slang::syntax::SyntaxNode *, PragmaInfo> by_node;
+};
 
-  PragmaMap collect_pragmas(slang::driver::Driver &driver);
+PragmaMap collect_pragmas(slang::driver::Driver &driver);
 
 } // namespace abys::frontend
