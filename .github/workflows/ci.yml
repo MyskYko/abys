@@ -6,7 +6,7 @@ on:
 
 env:
   SLANG_RELEASE_TAG: slang-ubuntu-2026-06-29
-  SLANG_TARBALL_SHA256: cd8d62c788cd49f05ded866268d4fe01d64a4a5c4f9e6ab77739a3bd4e21a94b
+  SLANG_TARBALL_SHA256: 86b0eee26eaac399803ec1392bd2d96007d555d137466a066aaded69d30aa892
 
 jobs:
   build-test:
@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: _slang
-          key: ${{ env.SLANG_RELEASE_TAG }}
+          key: ${{ env.SLANG_RELEASE_TAG }}-${{ env.SLANG_TARBALL_SHA256 }}
       - name: Fetch slang (prebuilt)
         run: |
           if [ -d _slang/lib/cmake/slang ]; then
@@ -70,7 +70,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: _slang
-          key: ${{ env.SLANG_RELEASE_TAG }}
+          key: ${{ env.SLANG_RELEASE_TAG }}-${{ env.SLANG_TARBALL_SHA256 }}
       - name: Fetch slang (prebuilt)
         run: |
           if [ -d _slang/lib/cmake/slang ]; then
