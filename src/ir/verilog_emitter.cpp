@@ -307,11 +307,15 @@ void VerilogEmitter::emit_reset_mux_merge(std::string_view lhs, const Module &mo
     assert(input.port_idx < input_node.expr_roots.size());
     const ExprId root_id = input_node.expr_roots[input.port_idx];
     const auto &root = input_node.expr_graph.nodes[root_id];
-    assert(root.op == ExprGraph::Op::kMux);
-    std::ostringstream cond_ss;
-    emit_expr_rec(input_node.expr_graph, root.operands[0], "", cond_ss);
-    assert(cond_ss.str() == expected_cond);
-    branches.push_back({&input_node.expr_graph, root.operands[1], root.operands[2]});
+    if (root.op == ExprGraph::Op::kMux) {
+      std::ostringstream cond_ss;
+      emit_expr_rec(input_node.expr_graph, root.operands[0], "", cond_ss);
+      if (cond_ss.str() == expected_cond) {
+        branches.push_back({&input_node.expr_graph, root.operands[1], root.operands[2]});
+        continue;
+      }
+    }
+    branches.push_back({&input_node.expr_graph, root_id, root_id});
   }
   os << indent << "if (" << ((rst_edge == EdgeKind::kNegedge) ? "!" : "") << rst_name
      << ") begin\n";

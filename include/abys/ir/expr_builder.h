@@ -77,6 +77,7 @@ public:
   BitIndex normalize_index(BitIndex index, BitIndex msb, BitIndex lsb);
   ExprId normalize_index_expr(ExprId index, BitIndex msb, BitIndex lsb);
 
+  // TODO: think whether we should handle unpacked array select/range differently
   ExprId create_select(ExprId data, ExprId index, BitIndex msb,
                        BitIndex lsb); // normalize and maps to kRange
   ExprId create_reverse(ExprId data);
