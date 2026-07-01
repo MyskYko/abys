@@ -237,7 +237,7 @@ ExprGraph &TigBuilder::get_expr_graph(ModuleId module_id, NodeId node_id) {
 }
 
 void TigBuilder::insert_ffs(ModuleId module_id) {
-  // TODO: check of multiple driver
+  // TODO: check of multiple driver (e.g., overlapping)
   auto same_ff_props = [](const Tig::Module::PendingFf &a, const Tig::Module::PendingFf &b) {
     if (a.clk_spec.name != b.clk_spec.name || a.clk_spec.width != b.clk_spec.width ||
         a.clk_spec.sign != b.clk_spec.sign || a.clk_edge != b.clk_edge) {

@@ -514,6 +514,7 @@ ExprId ExprBuilder::create_gather(std::vector<ExprId> operands) {
 }
 ExprId ExprBuilder::create_masked_assign(ExprId current, ExprId next, ExprId base,
                                          ExprId slice_width, SignalWidth width, bool sign) {
+  assert(current != kInvalidExprId);
   const ExprId id = create_node();
   auto &node = get_node(id);
   node.op = ExprGraph::Op::kMaskedAssign;

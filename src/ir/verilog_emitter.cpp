@@ -268,6 +268,7 @@ void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) con
                   "    ");
       } else if (data_node.kind == Module::NodeKind::kMerge) {
         if (!rst_name.empty()) {
+          // special handling for yosys
           emit_reset_mux_merge(lhs_name, module, data_node, rst_name, node.rst_edge, os, "    ");
         } else {
           for (const auto &input : data_node.inputs) {
@@ -343,7 +344,8 @@ void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const Exp
     const ExprId slice_width = node.operands[3];
     std::ostringstream current_ss;
     emit_expr_rec(expr_graph, current, "", current_ss);
-    if (current_ss.str() != lhs) {
+    const bool direct_current = current_ss.str() == lhs;
+    if (!direct_current) {
       emit_expr(lhs, false, expr_graph, current, os,
                 indent); // turn off nonblocking to permit cascaded masked assigns
     }
@@ -355,7 +357,7 @@ void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const Exp
       emit_expr_rec(expr_graph, slice_width, "", ss);
     }
     ss << "]";
-    emit_expr(ss.str(), nonblocking && current == kInvalidExprId, expr_graph, next, os, indent);
+    emit_expr(ss.str(), nonblocking && direct_current, expr_graph, next, os, indent);
     return;
   }
   case ExprGraph::Op::kMux:
