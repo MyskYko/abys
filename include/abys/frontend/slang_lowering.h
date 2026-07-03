@@ -1425,6 +1425,13 @@ public:
           Tig::Subroutine::Port{std::string(arg->name), type.getBitstreamWidth(), type.isSigned()});
     }
     StmtBuilder stmt_builder(subr.expr_graph);
+    const auto &return_type = symbol.getReturnType();
+    const SignalWidth return_width = return_type.getBitstreamWidth();
+    const std::string return_unknown(return_width, 'x');
+    stmt_builder.get_expr_builder().update_value(
+        std::string(symbol.name), stmt_builder.get_expr_builder().find_or_create_const(
+                                      std::to_string(return_width) + "'b" + return_unknown,
+                                      return_width, return_type.isSigned()));
     SlangStmtLoweringVisitor<StmtBuilder> stmt_visitor(stmt_builder, special_symbols_, pragmas_);
     symbol.getBody().visit(stmt_visitor);
     const ExprId ret = stmt_builder.get_expr_builder().get_current_value(symbol.name);
