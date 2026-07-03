@@ -16,6 +16,9 @@ public:
   using Module = Tig::Module;
 
 private:
+  // use shift/mask selects for non-direct expression bases for yosys compatibility
+  static constexpr bool kUseShiftMaskForExpressionSelects = true;
+
   const Tig &design_;
 
   void emit_module(const Module &module, std::ostream &os) const;
@@ -34,6 +37,9 @@ private:
                  std::ostream &os, std::string_view indent) const;
   void emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::string_view lhs,
                      std::ostream &os) const;
+  bool can_emit_direct_range_base(const ExprGraph &expr_graph, ExprId id) const;
+  void emit_shifted_range(const ExprGraph &expr_graph, ExprId data_id, ExprId high_id,
+                          SignalWidth width, std::string_view lhs, std::ostream &os) const;
 };
 
 } // namespace abys::ir

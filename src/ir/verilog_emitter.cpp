@@ -624,21 +624,34 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
       if (i != 0) {
         os << ", ";
       }
-      emit_expr_rec(expr_graph, op_id, lhs, os);
-      os << "[" << i << "]";
+      if (!kUseShiftMaskForExpressionSelects || can_emit_direct_range_base(expr_graph, op_id)) {
+        emit_expr_rec(expr_graph, op_id, lhs, os);
+        os << "[" << i << "]";
+      } else {
+        os << "((";
+        emit_expr_rec(expr_graph, op_id, lhs, os);
+        os << " >> " << i << ") & 1'b1)";
+      }
     }
     os << "}";
     return;
   }
-  case ExprGraph::Op::kRange:
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
-    os << "[";
-    emit_expr_rec(expr_graph, node.operands[1], lhs, os);
-    if (node.width > 1) {
-      os << " -: " << node.width;
+  case ExprGraph::Op::kRange: {
+    const ExprId data_id = node.operands[0];
+    const ExprId high_id = node.operands[1];
+    if (!kUseShiftMaskForExpressionSelects || can_emit_direct_range_base(expr_graph, data_id)) {
+      emit_expr_rec(expr_graph, data_id, lhs, os);
+      os << "[";
+      emit_expr_rec(expr_graph, high_id, lhs, os);
+      if (node.width > 1) {
+        os << " -: " << node.width;
+      }
+      os << "]";
+    } else {
+      emit_shifted_range(expr_graph, data_id, high_id, node.width, lhs, os);
     }
-    os << "]";
     return;
+  }
   case ExprGraph::Op::kArraySelect:
     emit_expr_rec(expr_graph, node.operands[0], lhs, os);
     os << "[";
@@ -662,25 +675,68 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
     const ExprId base = node.operands[2];
     const ExprId slice_width = node.operands[3];
     const SignalWidth width = node.width;
+    auto emit_low_base = [&]() {
+      if (slice_width == expr_graph.constant_one) {
+        emit_expr_rec(expr_graph, base, lhs, os);
+        return;
+      }
+      os << "(";
+      emit_expr_rec(expr_graph, base, lhs, os);
+      os << " - (";
+      emit_expr_rec(expr_graph, slice_width, lhs, os);
+      os << " - 1))";
+    };
     os << "((";
     emit_expr_rec(expr_graph, current, lhs, os);
     os << " & ~(({" << width << "{1'b1}} >> (" << width << " - ";
     emit_expr_rec(expr_graph, slice_width, lhs, os);
-    os << ")) << ";
-    emit_expr_rec(expr_graph, base, lhs, os);
-    os << ")) | ((";
+    os << ")) << (";
+    emit_low_base();
+    os << "))) | ((";
     emit_expr_rec(expr_graph, next, lhs, os);
     os << " & ({" << width << "{1'b1}} >> (" << width << " - ";
     emit_expr_rec(expr_graph, slice_width, lhs, os);
-    os << "))) << ";
-    emit_expr_rec(expr_graph, base, lhs, os);
-    os << "))";
+    os << "))) << (";
+    emit_low_base();
+    os << ")))";
     return;
   }
   default:
     // kBothEdge
     assert(false);
   }
+}
+
+bool VerilogEmitter::can_emit_direct_range_base(const ExprGraph &expr_graph, ExprId id) const {
+  if (id == kInvalidExprId) {
+    return false;
+  }
+  const auto &node = expr_graph.nodes[id];
+  return node.op == ExprGraph::Op::kInput || node.op == ExprGraph::Op::kArraySelect;
+}
+
+void VerilogEmitter::emit_shifted_range(const ExprGraph &expr_graph, ExprId data_id, ExprId high_id,
+                                        SignalWidth width, std::string_view lhs,
+                                        std::ostream &os) const {
+  assert(width > 0);
+  os << "((";
+  emit_expr_rec(expr_graph, data_id, lhs, os);
+  os << " >> (";
+  emit_expr_rec(expr_graph, high_id, lhs, os);
+  if (width > 1) {
+    os << " - " << (width - 1);
+  }
+  os << ")) & ";
+  if (width == 1) {
+    os << "1'b1";
+  } else {
+    os << width << "'h";
+    const int digits = static_cast<int>((width + 3) / 4);
+    for (int i = 0; i < digits; ++i) {
+      os << "f";
+    }
+  }
+  os << ")";
 }
 
 void VerilogEmitter::emit_module_footer(std::ostream &os) const {
