@@ -54,6 +54,12 @@ void TigBuilder::add_input_spec(ModuleId module_id, NodeId node_id, SignalSpec i
 }
 
 TigBuilder::ModuleId TigBuilder::create_module(std::string name) {
+  size_t &count = design_.module_name_counts[name];
+  if (count == 0) {
+    ++count;
+  } else {
+    name += "__abys_" + std::to_string(count++);
+  }
   ModuleId module_id = static_cast<ModuleId>(design_.modules.size());
   design_.modules.emplace_back();
   design_.modules.back().name = std::move(name);

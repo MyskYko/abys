@@ -1074,7 +1074,9 @@ public:
     // TODO: I think it's fine to ignore and cleanup unused signal later
   }
 
-  void handle(const slang::ast::ParameterSymbol &) {}
+  void handle(const slang::ast::ParameterSymbol &) {
+    // TODO: parameters should be saved per module variant for easier debugging
+  }
 
   void handle(const slang::ast::PortSymbol &symbol) {
     this->visitDefault(symbol);

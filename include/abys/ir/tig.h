@@ -116,6 +116,7 @@ struct Tig {
 
   std::string top_module_name;
   std::vector<Module> modules;
+  std::unordered_map<std::string, size_t> module_name_counts;
   std::vector<Subroutine> subroutines;
   uint32_t temporary_name_count = 0;
 };
