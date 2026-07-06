@@ -230,6 +230,27 @@ void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) con
       }
     }
   }
+  const auto emit_ff_data = [&](const auto &self, std::string_view lhs,
+                                const Module::EdgeRef &data_ref, std::string_view indent,
+                                const std::unordered_map<std::string, bool> *assumptions) -> void {
+    assert(data_ref.node_id < module.nodes.size());
+    const auto &data_node = module.nodes[data_ref.node_id];
+    const std::string data_name = data_node.outputs[data_ref.port_idx].name;
+    if (!data_name.empty()) {
+      os << indent << lhs << " <= " << data_name << ";\n";
+      return;
+    }
+    if (data_node.kind == Module::NodeKind::kOp) {
+      assert(data_ref.port_idx < data_node.expr_roots.size());
+      emit_expr(lhs, true, data_node.expr_graph, data_node.expr_roots[data_ref.port_idx], os,
+                indent, assumptions);
+      return;
+    }
+    assert(data_node.kind == Module::NodeKind::kMerge);
+    for (const auto &input : data_node.inputs) {
+      self(self, lhs, input, indent, assumptions);
+    }
+  };
   for (Tig::NodeId ff_id = 0; ff_id < module.nodes.size(); ++ff_id) {
     const auto &node = module.nodes[ff_id];
     if (node.kind != Module::NodeKind::kFf) {
@@ -246,8 +267,6 @@ void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) con
     }
     assert(!lhs_name.empty());
     const auto &data_ref = node.inputs[0];
-    const auto &data_node = module.nodes[data_ref.node_id];
-    const std::string data_name = data_node.outputs[data_ref.port_idx].name;
     const auto &clk_ref = node.inputs[1];
     const auto &clk_node = module.nodes[clk_ref.node_id];
     const std::string clk_name = clk_node.outputs[clk_ref.port_idx].name;
@@ -261,77 +280,57 @@ void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) con
       os << " or " << edge_to_string(node.rst_edge) << " " << rst_name;
     }
     os << ") begin\n";
-    if (data_name.empty()) {
-      if (data_node.kind == Module::NodeKind::kOp) {
-        assert(data_ref.port_idx < data_node.expr_roots.size());
-        emit_expr(lhs_name, true, data_node.expr_graph, data_node.expr_roots[data_ref.port_idx], os,
-                  "    ");
-      } else if (data_node.kind == Module::NodeKind::kMerge) {
-        if (!rst_name.empty()) {
-          // special handling for yosys
-          emit_reset_mux_merge(lhs_name, module, data_node, rst_name, node.rst_edge, os, "    ");
-        } else {
-          for (const auto &input : data_node.inputs) {
-            const auto &input_node = module.nodes[input.node_id];
-            assert(input.node_id < module.nodes.size());
-            assert(input_node.kind == Module::NodeKind::kOp);
-            assert(input.port_idx < input_node.expr_roots.size());
-            emit_expr(lhs_name, true, input_node.expr_graph, input_node.expr_roots[input.port_idx],
-                      os, "    ");
-          }
-        }
-      }
+    if (!rst_name.empty()) {
+      const bool reset_value = node.rst_edge == EdgeKind::kPosedge;
+      const std::unordered_map<std::string, bool> reset_assumptions{{rst_name, reset_value}};
+      const std::unordered_map<std::string, bool> clock_assumptions{{rst_name, !reset_value}};
+      os << "    if (" << ((node.rst_edge == EdgeKind::kNegedge) ? "!" : "") << rst_name
+         << ") begin\n";
+      emit_ff_data(emit_ff_data, lhs_name, data_ref, "      ", &reset_assumptions);
+      os << "    end else begin\n";
+      emit_ff_data(emit_ff_data, lhs_name, data_ref, "      ", &clock_assumptions);
+      os << "    end\n";
     } else {
-      os << "    " << node.outputs[0].name << " <= " << data_name << ";\n";
+      emit_ff_data(emit_ff_data, lhs_name, data_ref, "    ", nullptr);
     }
     os << "  end\n";
   }
 }
 
-void VerilogEmitter::emit_reset_mux_merge(std::string_view lhs, const Module &module,
-                                          const Module::Node &merge_node, std::string_view rst_name,
-                                          EdgeKind rst_edge, std::ostream &os,
-                                          std::string_view indent) const {
-  struct ResetMuxBranches {
-    const ExprGraph *expr_graph;
-    ExprId on_reset_id;
-    ExprId on_clock_id;
-  };
-  std::vector<ResetMuxBranches> branches;
-  branches.reserve(merge_node.inputs.size());
-  const std::string expected_cond =
-      (rst_edge == EdgeKind::kNegedge) ? "(!" + std::string(rst_name) + ")" : std::string(rst_name);
-  for (const auto &input : merge_node.inputs) {
-    const auto &input_node = module.nodes[input.node_id];
-    assert(input.node_id < module.nodes.size());
-    assert(input_node.kind == Module::NodeKind::kOp);
-    assert(input.port_idx < input_node.expr_roots.size());
-    const ExprId root_id = input_node.expr_roots[input.port_idx];
-    const auto &root = input_node.expr_graph.nodes[root_id];
-    if (root.op == ExprGraph::Op::kMux) {
-      std::ostringstream cond_ss;
-      emit_expr_rec(input_node.expr_graph, root.operands[0], "", cond_ss);
-      if (cond_ss.str() == expected_cond) {
-        branches.push_back({&input_node.expr_graph, root.operands[1], root.operands[2]});
-        continue;
+bool VerilogEmitter::lookup_assumed_condition(
+    const ExprGraph &expr_graph, ExprId id,
+    const std::unordered_map<std::string, bool> *assumptions, bool &value) const {
+  if (assumptions == nullptr) {
+    return false;
+  }
+  if (id == kInvalidExprId) {
+    return false;
+  }
+  const auto &node = expr_graph.nodes[id];
+  if (node.op == ExprGraph::Op::kInput) {
+    for (const auto &input : expr_graph.inputs) {
+      if (input.second == id) {
+        auto it = assumptions->find(input.first);
+        if (it == assumptions->end()) {
+          return false;
+        }
+        value = it->second;
+        return true;
       }
     }
-    branches.push_back({&input_node.expr_graph, root_id, root_id});
+    return false;
   }
-  os << indent << "if (" << ((rst_edge == EdgeKind::kNegedge) ? "!" : "") << rst_name
-     << ") begin\n";
-  for (const auto &branch : branches) {
-    emit_expr(lhs, true, *branch.expr_graph, branch.on_reset_id, os, std::string(indent) + "  ");
+  if (node.op == ExprGraph::Op::kLogicalNot && node.operands.size() == 1 &&
+      lookup_assumed_condition(expr_graph, node.operands[0], assumptions, value)) {
+    value = !value;
+    return true;
   }
-  os << indent << "end else begin\n";
-  for (const auto &branch : branches) {
-    emit_expr(lhs, true, *branch.expr_graph, branch.on_clock_id, os, std::string(indent) + "  ");
-  }
-  os << indent << "end\n";
+  return false;
 }
 
 void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const ExprGraph &expr_graph,
-                               ExprId id, std::ostream &os, std::string_view indent) const {
+                               ExprId id, std::ostream &os, std::string_view indent,
+                               const std::unordered_map<std::string, bool> *assumptions) const {
   if (id == kInvalidExprId) {
     return;
   }
@@ -343,37 +342,46 @@ void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const Exp
     const ExprId base = node.operands[2];
     const ExprId slice_width = node.operands[3];
     std::ostringstream current_ss;
-    emit_expr_rec(expr_graph, current, "", current_ss);
+    emit_expr_rec(expr_graph, current, "", current_ss, assumptions);
     const bool direct_current = current_ss.str() == lhs;
     if (!direct_current) {
-      emit_expr(lhs, false, expr_graph, current, os,
-                indent); // turn off nonblocking to permit cascaded masked assigns
+      emit_expr(lhs, false, expr_graph, current, os, indent,
+                assumptions); // turn off nonblocking to permit cascaded masked assigns
     }
     std::ostringstream ss;
     ss << lhs << "[";
-    emit_expr_rec(expr_graph, base, "", ss);
+    emit_expr_rec(expr_graph, base, "", ss, assumptions);
     if (slice_width != expr_graph.constant_one) {
       ss << " -: ";
-      emit_expr_rec(expr_graph, slice_width, "", ss);
+      emit_expr_rec(expr_graph, slice_width, "", ss, assumptions);
     }
     ss << "]";
-    emit_expr(ss.str(), nonblocking && direct_current, expr_graph, next, os, indent);
+    emit_expr(ss.str(), nonblocking && direct_current, expr_graph, next, os, indent, assumptions);
     return;
   }
-  case ExprGraph::Op::kMux:
+  case ExprGraph::Op::kMux: {
+    bool assumed = false;
+    if (lookup_assumed_condition(expr_graph, node.operands[0], assumptions, assumed)) {
+      emit_expr(lhs, nonblocking, expr_graph, node.operands[assumed ? 1 : 2], os, indent,
+                assumptions);
+      return;
+    }
     os << indent << "if (";
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << ") begin\n";
-    emit_expr(lhs, nonblocking, expr_graph, node.operands[1], os, std::string(indent) + "  ");
+    emit_expr(lhs, nonblocking, expr_graph, node.operands[1], os, std::string(indent) + "  ",
+              assumptions);
     os << indent << "end else begin\n";
-    emit_expr(lhs, nonblocking, expr_graph, node.operands[2], os, std::string(indent) + "  ");
+    emit_expr(lhs, nonblocking, expr_graph, node.operands[2], os, std::string(indent) + "  ",
+              assumptions);
     os << indent << "end\n";
     return;
+  }
   case ExprGraph::Op::kCase: {
     assert(!node.operands.empty());
     const bool has_default = node.operands.size() % 2 == 0;
     os << indent << "case (";
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << ")";
     if (!has_default) {
       os << " // synopsys full_case";
@@ -388,19 +396,21 @@ void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const Exp
           if (k) {
             os << ", ";
           }
-          emit_expr_rec(expr_graph, value_node.operands[k], lhs, os);
+          emit_expr_rec(expr_graph, value_node.operands[k], lhs, os, assumptions);
         }
       } else {
-        emit_expr_rec(expr_graph, node.operands[i], lhs, os);
+        emit_expr_rec(expr_graph, node.operands[i], lhs, os, assumptions);
       }
       os << ": begin\n";
-      emit_expr(lhs, nonblocking, expr_graph, node.operands[i + 1], os, std::string(indent) + "  ");
+      emit_expr(lhs, nonblocking, expr_graph, node.operands[i + 1], os, std::string(indent) + "  ",
+                assumptions);
       os << indent << "end\n";
       i += 2;
     }
     if (i < node.operands.size()) {
       os << indent << "default: begin\n";
-      emit_expr(lhs, nonblocking, expr_graph, node.operands[i], os, std::string(indent) + "  ");
+      emit_expr(lhs, nonblocking, expr_graph, node.operands[i], os, std::string(indent) + "  ",
+                assumptions);
       os << indent << "end\n";
     }
     os << indent << "endcase\n";
@@ -409,14 +419,15 @@ void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const Exp
   default:
     os << indent << lhs;
     os << (nonblocking ? " <= " : " = ");
-    emit_expr_rec(expr_graph, id, lhs, os);
+    emit_expr_rec(expr_graph, id, lhs, os, assumptions);
     os << ";\n";
     return;
   }
 }
 
 void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::string_view lhs,
-                                   std::ostream &os) const {
+                                   std::ostream &os,
+                                   const std::unordered_map<std::string, bool> *assumptions) const {
   if (id == kInvalidExprId) {
     os << lhs;
     return;
@@ -424,9 +435,9 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
   const auto &node = expr_graph.nodes[id];
   auto emit_bin = [&](const char *op) { // TODO: sign is probably not handled properly
     os << "(";
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << " " << op << " ";
-    emit_expr_rec(expr_graph, node.operands[1], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[1], lhs, os, assumptions);
     os << ")";
   };
   switch (node.op) {
@@ -450,32 +461,32 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
   }
   case ExprGraph::Op::kLogicalNot:
     os << "(!";
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << ")";
     return;
   case ExprGraph::Op::kBitwiseNot:
     os << "(~";
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << ")";
     return;
   case ExprGraph::Op::kAndReduce:
     os << "(&";
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << ")";
     return;
   case ExprGraph::Op::kOrReduce:
     os << "(|";
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << ")";
     return;
   case ExprGraph::Op::kXorReduce:
     os << "(^";
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << ")";
     return;
   case ExprGraph::Op::kUnaryMinus:
     os << "(-";
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << ")";
     return;
   case ExprGraph::Op::kAdd:
@@ -504,9 +515,9 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
     return;
   case ExprGraph::Op::kAshr:
     os << "($signed(";
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << ") >>> ";
-    emit_expr_rec(expr_graph, node.operands[1], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[1], lhs, os, assumptions);
     os << ")";
     return;
   case ExprGraph::Op::kEq:
@@ -529,20 +540,26 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
       if (i) {
         os << " " << op << " ";
       }
-      emit_expr_rec(expr_graph, node.operands[i], lhs, os);
+      emit_expr_rec(expr_graph, node.operands[i], lhs, os, assumptions);
     }
     os << ")";
     return;
   }
-  case ExprGraph::Op::kMux:
+  case ExprGraph::Op::kMux: {
+    bool assumed = false;
+    if (lookup_assumed_condition(expr_graph, node.operands[0], assumptions, assumed)) {
+      emit_expr_rec(expr_graph, node.operands[assumed ? 1 : 2], lhs, os, assumptions);
+      return;
+    }
     os << "(";
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << " ? ";
-    emit_expr_rec(expr_graph, node.operands[1], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[1], lhs, os, assumptions);
     os << " : ";
-    emit_expr_rec(expr_graph, node.operands[2], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[2], lhs, os, assumptions);
     os << ")";
     return;
+  }
   case ExprGraph::Op::kCase: {
     // operands = [selector, value0, data0, value1, data1, ..., default?]
     const ExprId sel = node.operands[0];
@@ -555,17 +572,17 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
             os << " || ";
           }
           os << "(";
-          emit_expr_rec(expr_graph, sel, lhs, os);
+          emit_expr_rec(expr_graph, sel, lhs, os, assumptions);
           os << " == ";
-          emit_expr_rec(expr_graph, v.operands[k], lhs, os);
+          emit_expr_rec(expr_graph, v.operands[k], lhs, os, assumptions);
           os << ")";
         }
         os << ")";
       } else {
         os << "(";
-        emit_expr_rec(expr_graph, sel, lhs, os);
+        emit_expr_rec(expr_graph, sel, lhs, os, assumptions);
         os << " == ";
-        emit_expr_rec(expr_graph, value_id, lhs, os);
+        emit_expr_rec(expr_graph, value_id, lhs, os, assumptions);
         os << ")";
       }
     };
@@ -580,13 +597,13 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
       first = false;
       emit_match(value_id);
       os << " ? ";
-      emit_expr_rec(expr_graph, data_id, lhs, os);
+      emit_expr_rec(expr_graph, data_id, lhs, os, assumptions);
     }
     if (i < node.operands.size()) {
       if (!first) {
         os << " : ";
       }
-      emit_expr_rec(expr_graph, node.operands[i], lhs, os);
+      emit_expr_rec(expr_graph, node.operands[i], lhs, os, assumptions);
     } else {
       if (!first) {
         os << " : ";
@@ -598,7 +615,7 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
   }
   case ExprGraph::Op::kConvert: {
     os << (node.sign ? "$signed(" : "$unsigned(");
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << ")";
     return;
   }
@@ -608,7 +625,7 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
       if (i) {
         os << ", ";
       }
-      emit_expr_rec(expr_graph, node.operands[i], lhs, os);
+      emit_expr_rec(expr_graph, node.operands[i], lhs, os, assumptions);
     }
     os << "}";
     return;
@@ -616,7 +633,7 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
     const ExprId op_id = node.operands[0];
     const auto &op_node = expr_graph.nodes[op_id];
     if (op_node.width <= 1) {
-      emit_expr_rec(expr_graph, op_id, lhs, os);
+      emit_expr_rec(expr_graph, op_id, lhs, os, assumptions);
       return;
     }
     os << "{";
@@ -625,11 +642,11 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
         os << ", ";
       }
       if (!kUseShiftMaskForExpressionSelects || can_emit_direct_range_base(expr_graph, op_id)) {
-        emit_expr_rec(expr_graph, op_id, lhs, os);
+        emit_expr_rec(expr_graph, op_id, lhs, os, assumptions);
         os << "[" << i << "]";
       } else {
         os << "((";
-        emit_expr_rec(expr_graph, op_id, lhs, os);
+        emit_expr_rec(expr_graph, op_id, lhs, os, assumptions);
         os << " >> " << i << ") & 1'b1)";
       }
     }
@@ -640,22 +657,22 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
     const ExprId data_id = node.operands[0];
     const ExprId high_id = node.operands[1];
     if (!kUseShiftMaskForExpressionSelects || can_emit_direct_range_base(expr_graph, data_id)) {
-      emit_expr_rec(expr_graph, data_id, lhs, os);
+      emit_expr_rec(expr_graph, data_id, lhs, os, assumptions);
       os << "[";
-      emit_expr_rec(expr_graph, high_id, lhs, os);
+      emit_expr_rec(expr_graph, high_id, lhs, os, assumptions);
       if (node.width > 1) {
         os << " -: " << node.width;
       }
       os << "]";
     } else {
-      emit_shifted_range(expr_graph, data_id, high_id, node.width, lhs, os);
+      emit_shifted_range(expr_graph, data_id, high_id, node.width, lhs, os, assumptions);
     }
     return;
   }
   case ExprGraph::Op::kArraySelect:
-    emit_expr_rec(expr_graph, node.operands[0], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[0], lhs, os, assumptions);
     os << "[";
-    emit_expr_rec(expr_graph, node.operands[1], lhs, os);
+    emit_expr_rec(expr_graph, node.operands[1], lhs, os, assumptions);
     os << "]";
     return;
   case ExprGraph::Op::kGather: {
@@ -664,7 +681,7 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
       if (i) {
         os << ", ";
       }
-      emit_expr_rec(expr_graph, node.operands[i], lhs, os);
+      emit_expr_rec(expr_graph, node.operands[i], lhs, os, assumptions);
     }
     os << "}";
     return;
@@ -677,25 +694,25 @@ void VerilogEmitter::emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::
     const SignalWidth width = node.width;
     auto emit_low_base = [&]() {
       if (slice_width == expr_graph.constant_one) {
-        emit_expr_rec(expr_graph, base, lhs, os);
+        emit_expr_rec(expr_graph, base, lhs, os, assumptions);
         return;
       }
       os << "(";
-      emit_expr_rec(expr_graph, base, lhs, os);
+      emit_expr_rec(expr_graph, base, lhs, os, assumptions);
       os << " - (";
-      emit_expr_rec(expr_graph, slice_width, lhs, os);
+      emit_expr_rec(expr_graph, slice_width, lhs, os, assumptions);
       os << " - 1))";
     };
     os << "((";
-    emit_expr_rec(expr_graph, current, lhs, os);
+    emit_expr_rec(expr_graph, current, lhs, os, assumptions);
     os << " & ~(({" << width << "{1'b1}} >> (" << width << " - ";
-    emit_expr_rec(expr_graph, slice_width, lhs, os);
+    emit_expr_rec(expr_graph, slice_width, lhs, os, assumptions);
     os << ")) << (";
     emit_low_base();
     os << "))) | ((";
-    emit_expr_rec(expr_graph, next, lhs, os);
+    emit_expr_rec(expr_graph, next, lhs, os, assumptions);
     os << " & ({" << width << "{1'b1}} >> (" << width << " - ";
-    emit_expr_rec(expr_graph, slice_width, lhs, os);
+    emit_expr_rec(expr_graph, slice_width, lhs, os, assumptions);
     os << "))) << (";
     emit_low_base();
     os << ")))";
@@ -715,14 +732,15 @@ bool VerilogEmitter::can_emit_direct_range_base(const ExprGraph &expr_graph, Exp
   return node.op == ExprGraph::Op::kInput || node.op == ExprGraph::Op::kArraySelect;
 }
 
-void VerilogEmitter::emit_shifted_range(const ExprGraph &expr_graph, ExprId data_id, ExprId high_id,
-                                        SignalWidth width, std::string_view lhs,
-                                        std::ostream &os) const {
+void VerilogEmitter::emit_shifted_range(
+    const ExprGraph &expr_graph, ExprId data_id, ExprId high_id, SignalWidth width,
+    std::string_view lhs, std::ostream &os,
+    const std::unordered_map<std::string, bool> *assumptions) const {
   assert(width > 0);
   os << "((";
-  emit_expr_rec(expr_graph, data_id, lhs, os);
+  emit_expr_rec(expr_graph, data_id, lhs, os, assumptions);
   os << " >> (";
-  emit_expr_rec(expr_graph, high_id, lhs, os);
+  emit_expr_rec(expr_graph, high_id, lhs, os, assumptions);
   if (width > 1) {
     os << " - " << (width - 1);
   }

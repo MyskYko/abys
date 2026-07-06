@@ -2,6 +2,7 @@
 
 #include <ostream>
 #include <string>
+#include <unordered_map>
 
 #include "abys/ir/tig.h"
 
@@ -30,16 +31,18 @@ private:
   void emit_output_binds(const Module &module, std::ostream &os) const;
   void emit_module_footer(std::ostream &os) const;
 
-  void emit_reset_mux_merge(std::string_view lhs, const Module &module,
-                            const Module::Node &merge_node, std::string_view rst_name,
-                            EdgeKind rst_edge, std::ostream &os, std::string_view indent) const;
   void emit_expr(std::string_view lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id,
-                 std::ostream &os, std::string_view indent) const;
-  void emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::string_view lhs,
-                     std::ostream &os) const;
+                 std::ostream &os, std::string_view indent,
+                 const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
+  void emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::string_view lhs, std::ostream &os,
+                     const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
+  bool lookup_assumed_condition(const ExprGraph &expr_graph, ExprId id,
+                                const std::unordered_map<std::string, bool> *assumptions,
+                                bool &value) const;
   bool can_emit_direct_range_base(const ExprGraph &expr_graph, ExprId id) const;
   void emit_shifted_range(const ExprGraph &expr_graph, ExprId data_id, ExprId high_id,
-                          SignalWidth width, std::string_view lhs, std::ostream &os) const;
+                          SignalWidth width, std::string_view lhs, std::ostream &os,
+                          const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
 };
 
 } // namespace abys::ir
