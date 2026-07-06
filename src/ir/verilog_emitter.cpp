@@ -320,7 +320,9 @@ bool VerilogEmitter::lookup_assumed_condition(
     }
     return false;
   }
-  if (node.op == ExprGraph::Op::kLogicalNot && node.operands.size() == 1 &&
+  if ((node.op == ExprGraph::Op::kLogicalNot ||
+       (node.op == ExprGraph::Op::kBitwiseNot && node.width == 1)) &&
+      node.operands.size() == 1 &&
       lookup_assumed_condition(expr_graph, node.operands[0], assumptions, value)) {
     value = !value;
     return true;
