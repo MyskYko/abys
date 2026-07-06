@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <cctype>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -56,6 +57,25 @@ static inline bool expr_sign(const slang::ast::Expression &expr) {
   return expr.type->isSigned();
 }
 
+std::string make_verilog_identifier(std::string_view name) {
+  auto is_head = [](unsigned char c) { return std::isalpha(c) || c == '_'; };
+  auto is_body = [](unsigned char c) { return std::isalnum(c) || c == '_' || c == '$'; };
+  if (!name.empty() && is_head(static_cast<unsigned char>(name.front()))) {
+    bool simple = true;
+    for (char c : name) {
+      if (!is_body(static_cast<unsigned char>(c))) {
+        simple = false;
+        break;
+      }
+    }
+    if (simple) {
+      return std::string(name);
+    }
+  }
+
+  return "\\" + std::string(name) + " ";
+}
+
 std::string
 lower_symbol_name(const slang::ast::Symbol &symbol,
                   std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols) {
@@ -63,7 +83,7 @@ lower_symbol_name(const slang::ast::Symbol &symbol,
   if (it != special_symbols.end()) {
     return it->second;
   }
-  return std::string(symbol.name);
+  return make_verilog_identifier(symbol.name);
 }
 
 std::string
@@ -72,6 +92,7 @@ register_symbol_name(const slang::ast::Symbol &symbol,
                      std::string_view suffix = "") {
   std::string name = std::string(symbol.name);
   name += suffix;
+  name = make_verilog_identifier(name);
   special_symbols[&symbol] = name;
   return name;
 }
