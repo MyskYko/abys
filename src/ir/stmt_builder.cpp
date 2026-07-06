@@ -7,7 +7,7 @@
 namespace abys::ir {
 
 StmtBuilder::StmtBuilder(ExprGraph &expr_graph) : expr_graph_(expr_graph) {
-  contexts_.emplace_back(Context({ExprBuilder(expr_graph), {}, {}, {}, {}}));
+  contexts_.emplace_back(Context({ExprBuilder(expr_graph), {}, {}, {}, {}, {}}));
 }
 
 ExprBuilder &StmtBuilder::get_expr_builder() {
@@ -21,6 +21,9 @@ std::vector<bool> &StmtBuilder::output_nonblocking() {
 }
 std::vector<ExprId> &StmtBuilder::output_ids() {
   return contexts_.back().output_ids;
+}
+std::unordered_map<std::string, ExprId> &StmtBuilder::scheduled_assignments() {
+  return contexts_.back().scheduled_assignments;
 }
 void StmtBuilder::add_local_variable(std::string name) {
   contexts_.back().local_names.insert(std::move(name));
@@ -105,7 +108,8 @@ void StmtBuilder::add_timing(ExprId expr_id, ExprId iff_id, bool posedge, bool n
 }
 
 void StmtBuilder::create_context() {
-  contexts_.emplace_back(Context({ExprBuilder(get_expr_builder()), {}, {}, {}, {}}));
+  contexts_.emplace_back(
+      Context({ExprBuilder(get_expr_builder()), {}, {}, {}, {}, scheduled_assignments()}));
 }
 
 void StmtBuilder::stack_context() {
@@ -140,10 +144,20 @@ ExprId StmtBuilder::create_conditional_masked_assign(ExprBuilder &expr_builder, 
                                            masked.width, masked.sign);
 }
 
+ExprId StmtBuilder::fallback_value(const std::string &name) const {
+  const auto &ctx = contexts_.back();
+  auto it = ctx.scheduled_assignments.find(name);
+  if (it != ctx.scheduled_assignments.end()) {
+    return it->second;
+  }
+  return ctx.expr_builder.get_current_value(name);
+}
+
 void StmtBuilder::transfer_output(const Context &from, size_t i, ExprId expr_id) {
   if (!from.output_nonblocking[i]) {
     get_expr_builder().update_value(from.output_names[i], expr_id);
   }
+  scheduled_assignments()[from.output_names[i]] = expr_id;
   output_names().push_back(from.output_names[i]);
   output_nonblocking().push_back(from.output_nonblocking[i]);
   output_ids().push_back(expr_id);
@@ -241,7 +255,7 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
     } else {
       // not shared
       ExprId then_id = then_ctx.output_ids[i];
-      ExprId else_id = expr_builder.get_current_value(name);
+      ExprId else_id = fallback_value(name);
       new_id = create_conditional_masked_assign(expr_builder, cond_id, then_id, else_id, true);
       if (new_id == kInvalidExprId) {
         new_id = expr_builder.create_mux(cond_id, then_id, else_id);
@@ -258,7 +272,7 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
       continue;
     }
     // not shared
-    ExprId then_id = expr_builder.get_current_value(name);
+    ExprId then_id = fallback_value(name);
     ExprId else_id = else_ctx.output_ids[i];
     ExprId new_id =
         create_conditional_masked_assign(expr_builder, cond_id, else_id, then_id, false);
@@ -300,7 +314,7 @@ void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case
   }
   ExprBuilder &expr_builder = get_expr_builder();
   for (const auto &entry : output_map) {
-    ExprId current_id = expr_builder.get_current_value(entry.first);
+    ExprId current_id = fallback_value(entry.first);
     bool is_first = true;
     bool nonblocking;
     case_output_ids[entry.second].resize(context_stack_.size() - stack_index, kInvalidExprId);
@@ -329,6 +343,7 @@ void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case
     if (!nonblocking) {
       expr_builder.update_value(entry.first, new_id);
     }
+    scheduled_assignments()[entry.first] = new_id;
     output_names().push_back(entry.first);
     output_nonblocking().push_back(nonblocking);
     output_ids().push_back(new_id);

@@ -631,20 +631,29 @@ void ExprBuilder::get_input_spec(ExprId id, ExprId &input_id, std::string &name,
   sign = node.sign;
 }
 
-bool ExprBuilder::check_dependency(ExprId id, ExprId target) const {
+bool ExprBuilder::check_dependency_rec(ExprId id, ExprId target,
+                                       std::unordered_set<ExprId> &visited) const {
   if (id == target) {
     return true;
   }
   if (id == kInvalidExprId) {
     return false;
   }
+  if (!visited.insert(id).second) {
+    return false;
+  }
   const auto &node = graph_.nodes[id];
   for (ExprId operand : node.operands) {
-    if (check_dependency(operand, target)) {
+    if (check_dependency_rec(operand, target, visited)) {
       return true;
     }
   }
   return false;
+}
+
+bool ExprBuilder::check_dependency(ExprId id, ExprId target) const {
+  std::unordered_set<ExprId> visited;
+  return check_dependency_rec(id, target, visited);
 }
 
 std::optional<int> ExprBuilder::try_evaluate(ExprId id) const {

@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "abys/ir/expr.h"
@@ -134,6 +135,7 @@ private:
   ExprId create_binary(ExprGraph::Op op, ExprId a, ExprId b);
   ExprId create_shift(ExprGraph::Op op, ExprId data, ExprId shamt);
   ExprId create_compare(ExprGraph::Op op, ExprId a, ExprId b);
+  bool check_dependency_rec(ExprId id, ExprId target, std::unordered_set<ExprId> &visited) const;
 };
 
 } // namespace abys::ir

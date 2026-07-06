@@ -538,7 +538,8 @@ template <typename EmitFn>
 void lower_lhs_assignment(
     const slang::ast::Expression &whole_lhs, ExprId rhs_id, SignalWidth rhs_width,
     ExprBuilder &expr_builder,
-    std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols, EmitFn &&record) {
+    std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols,
+    const std::unordered_map<std::string, ExprId> *scheduled_assignments, EmitFn &&record) {
   assert(rhs_width > 0);
   BitIndex remaining = rhs_width;
 
@@ -646,7 +647,20 @@ void lower_lhs_assignment(
         expr_id = expr_builder.create_convert(expr_id, width, sign);
       }
     }
+    ExprId saved_current_id = kInvalidExprId;
+    bool restore_current = false;
+    if (scheduled_assignments != nullptr) {
+      auto it = scheduled_assignments->find(output_name);
+      if (it != scheduled_assignments->end()) {
+        saved_current_id = expr_builder.get_current_value(output_name);
+        expr_builder.update_value(output_name, it->second);
+        restore_current = true;
+      }
+    }
     expr_id = masked_assign_rec(masked_assign_rec, lhs, expr_id);
+    if (restore_current) {
+      expr_builder.update_value(output_name, saved_current_id);
+    }
     record(output_name, expr_id);
   }
   assert(remaining == 0);
@@ -680,6 +694,7 @@ public:
     if (const auto *init = symbol.getInitializer()) {
       ExprId expr_id = build_expr(*init, builder_.get_expr_builder(), special_symbols_);
       builder_.get_expr_builder().update_value(name, expr_id);
+      builder_.scheduled_assignments()[name] = expr_id;
       builder_.output_names().push_back(name);
       builder_.output_nonblocking().push_back(false);
       builder_.output_ids().push_back(expr_id);
@@ -753,17 +768,18 @@ public:
     const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
     const bool nonblocking = assign.isNonBlocking();
     std::unordered_map<std::string, ExprId> to_restore;
-    lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(),
-                         special_symbols_, [&](const std::string &output_name, ExprId expr_id) {
-                           if (nonblocking && !to_restore.count(output_name)) {
-                             to_restore[output_name] =
-                                 builder_.get_expr_builder().get_current_value(output_name);
-                           }
-                           builder_.get_expr_builder().update_value(output_name, expr_id);
-                           builder_.output_names().push_back(output_name);
-                           builder_.output_nonblocking().push_back(nonblocking);
-                           builder_.output_ids().push_back(expr_id);
-                         });
+    lower_lhs_assignment(
+        assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), special_symbols_,
+        &builder_.scheduled_assignments(), [&](const std::string &output_name, ExprId expr_id) {
+          if (nonblocking && !to_restore.count(output_name)) {
+            to_restore[output_name] = builder_.get_expr_builder().get_current_value(output_name);
+          }
+          builder_.get_expr_builder().update_value(output_name, expr_id);
+          builder_.scheduled_assignments()[output_name] = expr_id;
+          builder_.output_names().push_back(output_name);
+          builder_.output_nonblocking().push_back(nonblocking);
+          builder_.output_ids().push_back(expr_id);
+        });
     for (const auto &kv : to_restore) {
       builder_.get_expr_builder().update_value(kv.first, kv.second);
     }
@@ -847,6 +863,7 @@ public:
         if (const auto *init = var->getInitializer()) {
           ExprId expr_id = build_expr(*init, builder_.get_expr_builder(), special_symbols_);
           builder_.get_expr_builder().update_value(name, expr_id);
+          builder_.scheduled_assignments()[name] = expr_id;
           builder_.output_names().push_back(name);
           builder_.output_nonblocking().push_back(false);
           builder_.output_ids().push_back(expr_id);
@@ -868,8 +885,10 @@ public:
       ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), special_symbols_);
       const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
       lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(),
-                           special_symbols_, [&](const std::string &output_name, ExprId expr_id) {
+                           special_symbols_, &builder_.scheduled_assignments(),
+                           [&](const std::string &output_name, ExprId expr_id) {
                              builder_.get_expr_builder().update_value(output_name, expr_id);
+                             builder_.scheduled_assignments()[output_name] = expr_id;
                              builder_.output_names().push_back(output_name);
                              builder_.output_nonblocking().push_back(false);
                              builder_.output_ids().push_back(expr_id);
@@ -907,8 +926,10 @@ public:
         rhs_id = builder_.get_expr_builder().find_or_create_const(
             rhs_sv.toString(slang::LiteralBase::Binary), rhs_width, rhs_sign);
         lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(),
-                             special_symbols_, [&](const std::string &output_name, ExprId expr_id) {
+                             special_symbols_, &builder_.scheduled_assignments(),
+                             [&](const std::string &output_name, ExprId expr_id) {
                                builder_.get_expr_builder().update_value(output_name, expr_id);
+                               builder_.scheduled_assignments()[output_name] = expr_id;
                                builder_.output_names().push_back(output_name);
                                builder_.output_nonblocking().push_back(false);
                                builder_.output_ids().push_back(expr_id);
@@ -1240,7 +1261,7 @@ public:
             ExprBuilder expr_builder(builder_.get_expr_graph(module_id, op_id));
             ExprId rhs_id = expr_builder.find_or_create_input(temporary_name, rhs_width, rhs_sign);
             std::unordered_map<std::string, ExprId> to_store;
-            lower_lhs_assignment(lhs, rhs_id, rhs_width, expr_builder, special_symbols_,
+            lower_lhs_assignment(lhs, rhs_id, rhs_width, expr_builder, special_symbols_, nullptr,
                                  [&](const std::string &output_name, ExprId expr_id) {
                                    expr_builder.update_value(output_name, expr_id);
                                    to_store[output_name] = expr_id;
@@ -1313,7 +1334,7 @@ public:
       assert(output->kind == slang::ast::ExpressionKind::Assignment);
       const auto &assign = output->as<slang::ast::AssignmentExpression>();
       lower_lhs_assignment(assign.left(), rhs_id, rhs_width, expr_builder, special_symbols_,
-                           [&](const std::string &output_name, ExprId expr_id) {
+                           nullptr, [&](const std::string &output_name, ExprId expr_id) {
                              expr_builder.update_value(output_name, expr_id);
                              to_store[output_name] = expr_id;
                            });
@@ -1337,7 +1358,7 @@ public:
     const SignalWidth rhs_width = expr_builder.get_width(rhs_id);
     std::unordered_map<std::string, ExprId> to_store;
     lower_lhs_assignment(assign_expr.left(), rhs_id, rhs_width, expr_builder, special_symbols_,
-                         [&](const std::string &output_name, ExprId expr_id) {
+                         nullptr, [&](const std::string &output_name, ExprId expr_id) {
                            expr_builder.update_value(output_name, expr_id);
                            to_store[output_name] = expr_id;
                          });

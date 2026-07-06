@@ -16,10 +16,11 @@ public:
   explicit StmtBuilder(ExprGraph &expr_graph);
 
   ExprBuilder &get_expr_builder();
-  std::vector<std::string> &output_names(); // TODO: this and the following two may be replaced by
+  std::vector<std::string> &output_names(); // TODO: this and the following three may be replaced by
                                             // add_output(string, bool, ExprId) API
   std::vector<bool> &output_nonblocking();
   std::vector<ExprId> &output_ids();
+  std::unordered_map<std::string, ExprId> &scheduled_assignments();
   void add_local_variable(std::string name);
   size_t get_context_stack_index() const;
 
@@ -108,6 +109,7 @@ private:
     std::vector<bool> output_nonblocking;
     std::vector<ExprId> output_ids;
     std::unordered_set<std::string> local_names;
+    std::unordered_map<std::string, ExprId> scheduled_assignments;
   };
 
   std::vector<Context> contexts_;
@@ -116,6 +118,7 @@ private:
   ExprId create_conditional_masked_assign(ExprBuilder &expr_builder, ExprId cond_id,
                                           ExprId masked_id, ExprId current_id,
                                           bool then_updates) const;
+  ExprId fallback_value(const std::string &name) const;
   void transfer_output(const Context &from, size_t i, ExprId expr_id);
   std::vector<size_t> collect_last_output_indices(Context &ctx);
 
