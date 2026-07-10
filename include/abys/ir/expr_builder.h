@@ -22,6 +22,7 @@ public:
   ExprGraph::Node &get_node(ExprId id);
   SignalWidth get_width(ExprId id) const;
   bool get_sign(ExprId id) const;
+  bool is_sequence(ExprId id) const;
 
   ExprId find_or_create_input(std::string name, SignalWidth width, bool sign);
   ExprId find_or_create_const(std::string value, SignalWidth width, bool sign);
@@ -88,9 +89,18 @@ public:
                             BitIndex lsb); // maps to kRange
 
   ExprId create_gather(std::vector<ExprId> operands);
+  ExprId create_sequence(ExprId current, ExprId next);
+  ExprId create_unpacked_assign(ExprId next, ExprId base, ExprId slice_width, SignalWidth width,
+                                bool sign);
   ExprId create_masked_assign(ExprId current, ExprId next, ExprId base, ExprId slice_width,
                               SignalWidth width, bool sign);
 
+  ExprId unpacked_assign_select(ExprId next, ExprId index, BitIndex msb, BitIndex lsb,
+                                SignalWidth width, bool sign);
+  ExprId unpacked_assign_range(ExprId next, BitIndex left, BitIndex right, BitIndex msb,
+                               BitIndex lsb, SignalWidth width, bool sign);
+  ExprId unpacked_assign_part_select(ExprId next, ExprId base, SignalWidth slice_width, bool dir,
+                                     BitIndex msb, BitIndex lsb, SignalWidth width, bool sign);
   ExprId assign_select(ExprId current, ExprId next, ExprId index, BitIndex msb, BitIndex lsb);
   ExprId assign_range(ExprId current, ExprId next, BitIndex left, BitIndex right, BitIndex msb,
                       BitIndex lsb);

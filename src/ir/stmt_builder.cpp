@@ -118,32 +118,6 @@ void StmtBuilder::stack_context() {
   contexts_.pop_back();
 }
 
-ExprId StmtBuilder::create_conditional_masked_assign(ExprBuilder &expr_builder, ExprId cond_id,
-                                                     ExprId masked_id, ExprId current_id,
-                                                     bool then_updates) const {
-  const auto &masked = expr_builder.get_node(masked_id);
-  if (masked.op != ExprGraph::Op::kMaskedAssign) {
-    return kInvalidExprId;
-  }
-  if (current_id == kInvalidExprId) {
-    current_id = masked.operands[0];
-  }
-  assert(current_id != kInvalidExprId);
-  assert(masked.operands[0] == current_id);
-  const ExprId next_id = masked.operands[1];
-  const ExprId base_id = masked.operands[2];
-  const ExprId slice_width_id = masked.operands[3];
-  const auto &current = expr_builder.get_node(current_id);
-  const SignalWidth slice_width = static_cast<SignalWidth>(expr_builder.evaluate(slice_width_id));
-  const ExprId fallback_id = expr_builder.create_part_select(
-      current_id, base_id, slice_width, false, static_cast<BitIndex>(current.width - 1), 0);
-  const ExprId conditional_next_id = then_updates
-                                         ? expr_builder.create_mux(cond_id, next_id, fallback_id)
-                                         : expr_builder.create_mux(cond_id, fallback_id, next_id);
-  return expr_builder.create_masked_assign(current_id, conditional_next_id, base_id, slice_width_id,
-                                           masked.width, masked.sign);
-}
-
 ExprId StmtBuilder::fallback_value(const std::string &name) const {
   const auto &ctx = contexts_.back();
   auto it = ctx.scheduled_assignments.find(name);
@@ -235,13 +209,15 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
   for (size_t i : then_indices) {
     assert(then_ctx.local_names.empty()); // assuming locals can only be declared in block, which
                                           // removes local on merge
+    ExprId then_id = then_ctx.output_ids[i];
+    const bool is_sequence = expr_builder.is_sequence(then_id);
     const std::string &name = then_ctx.output_names[i];
     auto it = shared_output_to_else_index.find(name);
     ExprId new_id = kInvalidExprId;
     if (it != shared_output_to_else_index.end()) {
       // shared
-      ExprId then_id = then_ctx.output_ids[i];
       ExprId else_id = else_ctx.output_ids[it->second];
+      assert(expr_builder.is_sequence(else_id) == is_sequence);
       new_id = expr_builder.create_mux(cond_id, then_id, else_id);
       if (then_ctx.output_nonblocking[i] != else_ctx.output_nonblocking[it->second]) {
         if (!is_ff()) {
@@ -252,16 +228,18 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
         then_ctx.output_nonblocking[i] = true;
         else_ctx.output_nonblocking[it->second] = true;
       }
-    } else {
+    } else if (!is_sequence) {
       // not shared
-      ExprId then_id = then_ctx.output_ids[i];
       ExprId else_id = fallback_value(name);
-      new_id = create_conditional_masked_assign(expr_builder, cond_id, then_id, else_id, true);
-      if (new_id == kInvalidExprId) {
-        new_id = expr_builder.create_mux(cond_id, then_id, else_id);
-      }
+      new_id = expr_builder.create_mux(cond_id, then_id, else_id);
+    } else {
+      new_id = expr_builder.create_mux(cond_id, then_id, kInvalidExprId);
     }
     assert(new_id != kInvalidExprId);
+    if (is_sequence) {
+      ExprId current_id = fallback_value(name);
+      new_id = expr_builder.create_sequence(current_id, new_id);
+    }
     transfer_output(then_ctx, i, new_id);
   }
   // append else/non-shared outputs if not local & update their current values
@@ -274,9 +252,12 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
     // not shared
     ExprId then_id = fallback_value(name);
     ExprId else_id = else_ctx.output_ids[i];
-    ExprId new_id =
-        create_conditional_masked_assign(expr_builder, cond_id, else_id, then_id, false);
-    if (new_id == kInvalidExprId) {
+    const bool is_sequence = expr_builder.is_sequence(else_id);
+    ExprId new_id = kInvalidExprId;
+    if (is_sequence) {
+      new_id = expr_builder.create_mux(cond_id, kInvalidExprId, else_id);
+      new_id = expr_builder.create_sequence(then_id, new_id);
+    } else {
       new_id = expr_builder.create_mux(cond_id, then_id, else_id);
     }
     transfer_output(else_ctx, i, new_id);
@@ -285,12 +266,12 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
 
 void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case_values,
                              size_t stack_index, bool full_case) {
-  // TODO: handle conditional masked updates across case items, similar to partial assignments in
-  // if/else branches.
   size_t output_count = 0;
   std::unordered_map<std::string, size_t> output_map;
   std::vector<std::vector<ExprId>> case_output_ids;
   std::vector<std::vector<bool>> case_output_nonblocking;
+  std::vector<std::vector<bool>> case_output_sequence;
+  ExprBuilder &expr_builder = get_expr_builder();
   for (size_t j = 0; j < context_stack_.size() - stack_index; ++j) {
     const Context &ctx = context_stack_[j + stack_index];
     for (size_t i = 0; i < ctx.output_names.size(); ++i) {
@@ -301,8 +282,9 @@ void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case
         output_index = output_count;
         output_map[name] = output_count;
         ++output_count;
-        case_output_nonblocking.resize(output_count);
         case_output_ids.resize(output_count);
+        case_output_nonblocking.resize(output_count);
+        case_output_sequence.resize(output_count);
       } else {
         output_index = it->second;
       }
@@ -310,26 +292,38 @@ void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case
       case_output_ids[output_index][j] = ctx.output_ids[i];
       case_output_nonblocking[output_index].resize(j + 1, false);
       case_output_nonblocking[output_index][j] = ctx.output_nonblocking[i];
+      case_output_sequence[output_index].resize(j + 1, false);
+      case_output_sequence[output_index][j] = expr_builder.is_sequence(ctx.output_ids[i]);
     }
   }
-  ExprBuilder &expr_builder = get_expr_builder();
   for (const auto &entry : output_map) {
     ExprId current_id = fallback_value(entry.first);
-    bool is_first = true;
-    bool nonblocking;
     case_output_ids[entry.second].resize(context_stack_.size() - stack_index, kInvalidExprId);
     case_output_nonblocking[entry.second].resize(context_stack_.size() - stack_index, false);
     const size_t branch_count = case_output_ids[entry.second].size();
+    bool is_first = true;
+    bool is_nonblocking;
+    bool is_sequence;
     for (size_t j = 0; j < branch_count; ++j) {
       if (case_output_ids[entry.second][j] != kInvalidExprId) {
         if (is_first) {
-          nonblocking = case_output_nonblocking[entry.second][j];
+          is_nonblocking = case_output_nonblocking[entry.second][j];
+          is_sequence = case_output_sequence[entry.second][j];
           is_first = false;
         } else {
-          assert(nonblocking == case_output_nonblocking[entry.second][j]);
+          assert(is_nonblocking == case_output_nonblocking[entry.second][j]);
+          assert(is_sequence == case_output_sequence[entry.second][j]);
         }
-      } else if (!full_case || j + 1 != branch_count) {
-        case_output_ids[entry.second][j] = current_id;
+      }
+    }
+    assert(!is_first);
+    if (!is_sequence) {
+      for (size_t j = 0; j < branch_count; ++j) {
+        if (case_output_ids[entry.second][j] == kInvalidExprId) {
+          if (!full_case || j + 1 != branch_count) {
+            case_output_ids[entry.second][j] = current_id;
+          }
+        }
       }
     }
     if (full_case) {
@@ -337,15 +331,17 @@ void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case
       case_output_ids[entry.second].pop_back();
       case_output_nonblocking[entry.second].pop_back();
     }
-    assert(!is_first);
     ExprId new_id = expr_builder.create_case(selector_id, case_values,
                                              std::move(case_output_ids[entry.second]));
-    if (!nonblocking) {
+    if (is_sequence) {
+      new_id = expr_builder.create_sequence(current_id, new_id);
+    }
+    if (!is_nonblocking) {
       expr_builder.update_value(entry.first, new_id);
     }
     scheduled_assignments()[entry.first] = new_id;
     output_names().push_back(entry.first);
-    output_nonblocking().push_back(nonblocking);
+    output_nonblocking().push_back(is_nonblocking);
     output_ids().push_back(new_id);
   }
   while (context_stack_.size() > stack_index) {

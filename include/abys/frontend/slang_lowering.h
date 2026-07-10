@@ -585,41 +585,76 @@ void lower_lhs_assignment(
     return type.getFixedRange();
   };
 
-  auto masked_assign_rec = [&](auto &&self, const slang::ast::Expression &lhs,
-                               ExprId expr_id) -> ExprId {
+  auto assign_rec = [&](auto &&self, const slang::ast::Expression &lhs, const ExprId expr_id,
+                        const ExprId current_id) -> ExprId {
     if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
+      if (lhs.type->isUnpackedArray()) {
+        return expr_builder.create_sequence(current_id, expr_id);
+      }
       return expr_id;
     }
+    // TODO: Use kInvalidExprId as the kMaskedAssign current operand when current_id is invalid.
+    // TODO: Consider a special self-reference node for the current sequence to avoid pointing at a
+    // stale sequence.
     if (lhs.kind == slang::ast::ExpressionKind::ElementSelect) {
       const auto &sel = lhs.as<slang::ast::ElementSelectExpression>();
-      ExprId current_id = build_expr(sel.value(), expr_builder, special_symbols);
-      ExprId index_id = build_expr(sel.selector(), expr_builder, special_symbols);
-      slang::ConstantRange range = get_range(*sel.value().type);
-      ExprId updated_current_id =
-          expr_builder.assign_select(current_id, expr_id, index_id, range.left, range.right);
-      return self(self, sel.value(), updated_current_id);
+      const ExprId index_id = build_expr(sel.selector(), expr_builder, special_symbols);
+      const slang::ConstantRange range = get_range(*sel.value().type);
+      ExprId updated_expr_id = kInvalidExprId;
+      if (sel.value().type->isUnpackedArray()) {
+        SignalWidth width;
+        bool sign;
+        get_width_sign(*sel.value().type, width, sign);
+        updated_expr_id = expr_builder.unpacked_assign_select(expr_id, index_id, range.left,
+                                                              range.right, width, sign);
+      } else {
+        const ExprId selected_current_id = build_expr(sel.value(), expr_builder, special_symbols);
+        updated_expr_id = expr_builder.assign_select(selected_current_id, expr_id, index_id,
+                                                     range.left, range.right);
+      }
+      return self(self, sel.value(), updated_expr_id, current_id);
     }
     if (lhs.kind == slang::ast::ExpressionKind::RangeSelect) {
       const auto &sel = lhs.as<slang::ast::RangeSelectExpression>();
-      ExprId current_id = build_expr(sel.value(), expr_builder, special_symbols);
-      slang::ConstantRange range = get_range(*sel.value().type);
+      const slang::ConstantRange range = get_range(*sel.value().type);
       const auto kind = sel.getSelectionKind();
-      ExprId updated_current_id = kInvalidExprId;
-      if (kind == slang::ast::RangeSelectionKind::Simple) {
-        updated_current_id =
-            expr_builder.assign_range(current_id, expr_id, extract_constant_index(sel.left()),
-                                      extract_constant_index(sel.right()), range.left, range.right);
-      } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
-                 kind == slang::ast::RangeSelectionKind::IndexedDown) {
-        const SignalWidth slice_width = extract_constant_index(sel.right());
-        const ExprId base = build_expr(sel.left(), expr_builder, special_symbols);
-        const bool dir = kind == slang::ast::RangeSelectionKind::IndexedUp;
-        updated_current_id = expr_builder.assign_part_select(current_id, expr_id, base, slice_width,
-                                                             dir, range.left, range.right);
+      ExprId updated_expr_id = kInvalidExprId;
+      if (sel.value().type->isUnpackedArray()) {
+        SignalWidth width;
+        bool sign;
+        get_width_sign(*sel.value().type, width, sign);
+        if (kind == slang::ast::RangeSelectionKind::Simple) {
+          updated_expr_id = expr_builder.unpacked_assign_range(
+              expr_id, extract_constant_index(sel.left()), extract_constant_index(sel.right()),
+              range.left, range.right, width, sign);
+        } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
+                   kind == slang::ast::RangeSelectionKind::IndexedDown) {
+          const SignalWidth slice_width = extract_constant_index(sel.right());
+          const ExprId base = build_expr(sel.left(), expr_builder, special_symbols);
+          const bool dir = kind == slang::ast::RangeSelectionKind::IndexedUp;
+          updated_expr_id = expr_builder.unpacked_assign_part_select(
+              expr_id, base, slice_width, dir, range.left, range.right, width, sign);
+        } else {
+          throw std::logic_error("Unsupported range selection kind");
+        }
       } else {
-        throw std::logic_error("Unsupported range selection kind");
+        const ExprId selected_current_id = build_expr(sel.value(), expr_builder, special_symbols);
+        if (kind == slang::ast::RangeSelectionKind::Simple) {
+          updated_expr_id = expr_builder.assign_range(
+              selected_current_id, expr_id, extract_constant_index(sel.left()),
+              extract_constant_index(sel.right()), range.left, range.right);
+        } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
+                   kind == slang::ast::RangeSelectionKind::IndexedDown) {
+          const SignalWidth slice_width = extract_constant_index(sel.right());
+          const ExprId base = build_expr(sel.left(), expr_builder, special_symbols);
+          const bool dir = kind == slang::ast::RangeSelectionKind::IndexedUp;
+          updated_expr_id = expr_builder.assign_part_select(
+              selected_current_id, expr_id, base, slice_width, dir, range.left, range.right);
+        } else {
+          throw std::logic_error("Unsupported range selection kind");
+        }
       }
-      return self(self, sel.value(), updated_current_id);
+      return self(self, sel.value(), updated_expr_id, current_id);
     }
     throw std::logic_error("Unsupported LHS");
   };
@@ -657,7 +692,8 @@ void lower_lhs_assignment(
         restore_current = true;
       }
     }
-    expr_id = masked_assign_rec(masked_assign_rec, lhs, expr_id);
+    const ExprId current_id = expr_builder.get_current_value(output_name);
+    expr_id = assign_rec(assign_rec, lhs, expr_id, current_id);
     if (restore_current) {
       expr_builder.update_value(output_name, saved_current_id);
     }

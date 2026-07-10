@@ -27,6 +27,10 @@ SignalWidth ExprBuilder::get_width(ExprId id) const {
 bool ExprBuilder::get_sign(ExprId id) const {
   return graph_.nodes[id].sign;
 }
+bool ExprBuilder::is_sequence(ExprId id) const {
+  assert(id != kInvalidExprId);
+  return graph_.nodes[id].op == ExprGraph::Op::kSequence;
+}
 
 ExprId ExprBuilder::get_constant_zero() const {
   return graph_.constant_zero;
@@ -512,6 +516,42 @@ ExprId ExprBuilder::create_gather(std::vector<ExprId> operands) {
   node.operands = std::move(operands);
   return id;
 }
+ExprId ExprBuilder::create_sequence(ExprId current, ExprId next) {
+  assert(next != kInvalidExprId);
+  std::vector<ExprId> operands;
+  SignalWidth width;
+  if (current != kInvalidExprId) {
+    const auto &current_node = get_node(current);
+    if (current_node.op == ExprGraph::Op::kSequence) {
+      operands = current_node.operands;
+    } else {
+      operands.push_back(current);
+    }
+    width = current_node.width;
+    assert(get_node(next).width == width);
+  } else {
+    width = get_node(next).width;
+  }
+  operands.push_back(next);
+  const ExprId id = create_node();
+  auto &node = get_node(id);
+  node.op = ExprGraph::Op::kSequence;
+  node.width = width;
+  node.sign = false;
+  node.operands = std::move(operands);
+  return id;
+}
+ExprId ExprBuilder::create_unpacked_assign(ExprId next, ExprId base, ExprId slice_width,
+                                           SignalWidth width, bool sign) {
+  const ExprId id = create_node();
+  auto &node = get_node(id);
+  node.op = ExprGraph::Op::kUnpackedAssign;
+  node.width = width;
+  node.sign = sign;
+  assert(get_node(slice_width).op == ExprGraph::Op::kConst);
+  node.operands = {next, base, slice_width};
+  return id;
+}
 ExprId ExprBuilder::create_masked_assign(ExprId current, ExprId next, ExprId base,
                                          ExprId slice_width, SignalWidth width, bool sign) {
   assert(current != kInvalidExprId);
@@ -523,6 +563,40 @@ ExprId ExprBuilder::create_masked_assign(ExprId current, ExprId next, ExprId bas
   assert(get_node(slice_width).op == ExprGraph::Op::kConst);
   node.operands = {current, next, base, slice_width};
   return id;
+}
+
+ExprId ExprBuilder::unpacked_assign_select(ExprId next, ExprId index, BitIndex msb, BitIndex lsb,
+                                           SignalWidth width, bool sign) {
+  const ExprId pos = normalize_index_expr(index, msb, lsb);
+  return create_unpacked_assign(next, pos, get_constant_one(), width, sign);
+}
+
+ExprId ExprBuilder::unpacked_assign_range(ExprId next, BitIndex left, BitIndex right, BitIndex msb,
+                                          BitIndex lsb, SignalWidth width, bool sign) {
+  BitIndex left_pos = normalize_index(left, msb, lsb);
+  BitIndex right_pos = normalize_index(right, msb, lsb);
+  if (left_pos < right_pos) {
+    next = create_reverse(next);
+    std::swap(left_pos, right_pos);
+  }
+  ExprId left_id = find_or_create_const(left_pos);
+  ExprId width_id = find_or_create_const(left_pos - right_pos + 1);
+  return create_unpacked_assign(next, left_id, width_id, width, sign);
+}
+
+ExprId ExprBuilder::unpacked_assign_part_select(ExprId next, ExprId base, SignalWidth slice_width,
+                                                bool dir, BitIndex msb, BitIndex lsb,
+                                                SignalWidth width, bool sign) {
+  ExprId left = base;
+  if (dir) {
+    next = create_reverse(next);
+    assert(slice_width > 0);
+    const ExprId offset = find_or_create_const(slice_width - 1);
+    left = create_add(base, offset);
+  }
+  ExprId pos = normalize_index_expr(left, msb, lsb);
+  ExprId width_id = find_or_create_const(slice_width);
+  return create_unpacked_assign(next, pos, width_id, width, sign);
 }
 
 ExprId ExprBuilder::assign_select(ExprId current, ExprId next, ExprId index, BitIndex msb,
@@ -840,6 +914,8 @@ std::optional<int> ExprBuilder::try_evaluate(ExprId id) const {
   case ExprGraph::Op::kCase:
   case ExprGraph::Op::kConcat:
   case ExprGraph::Op::kGather:
+  case ExprGraph::Op::kSequence:
+  case ExprGraph::Op::kUnpackedAssign:
   case ExprGraph::Op::kMaskedAssign:
   case ExprGraph::Op::kReverse:
   case ExprGraph::Op::kRange:
@@ -971,6 +1047,8 @@ int ExprBuilder::evaluate(ExprId id) const {
     return evaluate(node.operands[0]);
   case ExprGraph::Op::kConcat:
   case ExprGraph::Op::kGather:
+  case ExprGraph::Op::kSequence:
+  case ExprGraph::Op::kUnpackedAssign:
   case ExprGraph::Op::kMaskedAssign:
   case ExprGraph::Op::kReverse:
   case ExprGraph::Op::kRange:

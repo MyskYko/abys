@@ -115,9 +115,6 @@ private:
   std::vector<Context> contexts_;
   std::vector<Context> context_stack_;
 
-  ExprId create_conditional_masked_assign(ExprBuilder &expr_builder, ExprId cond_id,
-                                          ExprId masked_id, ExprId current_id,
-                                          bool then_updates) const;
   ExprId fallback_value(const std::string &name) const;
   void transfer_output(const Context &from, size_t i, ExprId expr_id);
   std::vector<size_t> collect_last_output_indices(Context &ctx);
