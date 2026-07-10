@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <ostream>
 #include <string>
 #include <unordered_map>
@@ -34,8 +35,18 @@ private:
   void emit_expr(std::string_view lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id,
                  std::ostream &os, std::string_view indent,
                  const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
-  void emit_expr_rec(const ExprGraph &expr_graph, ExprId id, std::string_view lhs, std::ostream &os,
+  std::string
+  emit_expr_unpacked(std::string &lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id,
+                     std::map<ExprId, std::string> &names, std::ostream &decl_os, std::ostream &os,
+                     std::string_view indent,
                      const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
+  std::string
+  emit_expr_packed(const ExprGraph &expr_graph, ExprId id, std::map<ExprId, std::string> &names,
+                   std::ostream &decl_os, std::ostream &os, std::string_view indent,
+                   const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
+  void emit_expr_inline(const ExprGraph &expr_graph, ExprId id, std::string_view lhs,
+                        std::ostream &os,
+                        const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
   bool lookup_assumed_condition(const ExprGraph &expr_graph, ExprId id,
                                 const std::unordered_map<std::string, bool> *assumptions,
                                 bool &value) const;
