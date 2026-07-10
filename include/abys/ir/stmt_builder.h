@@ -75,14 +75,6 @@ public:
       const auto &name = const_output_names()[i];
       const bool nonblocking = const_output_nonblocking()[i];
       auto &entry = info[name];
-      if (entry.seen_nonblocking) {
-        ExprGraph::Node &node = get_expr_builder().get_node(const_output_ids()[i]);
-        if (node.op == ExprGraph::Op::kMaskedAssign) {
-          // TODO: handle two-sided conditional masked updates, e.g. if (c) a[0] <= 1; else a[1] <=
-          // 1;.
-          node.operands[0] = entry.expr_id;
-        }
-      }
       entry.expr_id = const_output_ids()[i];
       entry.seen_blocking |= !nonblocking;
       entry.seen_nonblocking |= nonblocking;

@@ -143,12 +143,6 @@ std::vector<size_t> StmtBuilder::collect_last_output_indices(Context &ctx) {
     const std::string &name = ctx.output_names[i];
     auto it = last_index.find(name);
     if (it != last_index.end()) {
-      ExprGraph::Node &node = ctx.expr_builder.get_node(ctx.output_ids[i]);
-      if (ctx.output_nonblocking[it->second] && node.op == ExprGraph::Op::kMaskedAssign) {
-        // TODO: handle two-sided conditional masked updates, e.g. if (c) a[0] <= 1; else a[1] <=
-        // 1;.
-        node.operands[0] = ctx.output_ids[it->second];
-      }
       if (ctx.output_nonblocking[it->second] != ctx.output_nonblocking[i]) {
         if (!is_ff()) {
           throw std::logic_error("Mixed blocking and nonblocking assignments to " + name);
