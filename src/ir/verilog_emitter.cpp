@@ -232,23 +232,25 @@ void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) con
   }
   const auto emit_ff_data = [&](const auto &self, std::string_view lhs,
                                 const Module::EdgeRef &data_ref, std::string_view indent,
-                                const std::unordered_map<std::string, bool> *assumptions) -> void {
+                                const std::unordered_map<std::string, bool> *assumptions,
+                                bool nonblocking) -> void {
     assert(data_ref.node_id < module.nodes.size());
     const auto &data_node = module.nodes[data_ref.node_id];
     const std::string data_name = data_node.outputs[data_ref.port_idx].name;
     if (!data_name.empty()) {
-      os << indent << lhs << " <= " << data_name << ";\n";
+      os << indent << lhs << (nonblocking ? " <= " : " = ") << data_name << ";\n";
       return;
     }
     if (data_node.kind == Module::NodeKind::kOp) {
       assert(data_ref.port_idx < data_node.expr_roots.size());
-      emit_expr(lhs, true, data_node.expr_graph, data_node.expr_roots[data_ref.port_idx], os,
+      emit_expr(lhs, nonblocking, data_node.expr_graph, data_node.expr_roots[data_ref.port_idx], os,
                 indent, assumptions);
       return;
     }
     assert(data_node.kind == Module::NodeKind::kMerge);
     for (const auto &input : data_node.inputs) {
-      self(self, lhs, input, indent, assumptions);
+      // Merge expansion needs blocking assignments to accumulate writes within this block.
+      self(self, lhs, input, indent, assumptions, false);
     }
   };
   for (Tig::NodeId ff_id = 0; ff_id < module.nodes.size(); ++ff_id) {
@@ -286,12 +288,15 @@ void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) con
       const std::unordered_map<std::string, bool> clock_assumptions{{rst_name, !reset_value}};
       os << "    if (" << ((node.rst_edge == EdgeKind::kNegedge) ? "!" : "") << rst_name
          << ") begin\n";
-      emit_ff_data(emit_ff_data, lhs_name, data_ref, "      ", &reset_assumptions);
+      // Emit top-level FF writes as NBA so Yosys can prove the sequential memory/FF pattern.
+      emit_ff_data(emit_ff_data, lhs_name, data_ref, "      ", &reset_assumptions, true);
       os << "    end else begin\n";
-      emit_ff_data(emit_ff_data, lhs_name, data_ref, "      ", &clock_assumptions);
+      // Emit top-level FF writes as NBA so Yosys can prove the sequential memory/FF pattern.
+      emit_ff_data(emit_ff_data, lhs_name, data_ref, "      ", &clock_assumptions, true);
       os << "    end\n";
     } else {
-      emit_ff_data(emit_ff_data, lhs_name, data_ref, "    ", nullptr);
+      // Emit top-level FF writes as NBA so Yosys can prove the sequential memory/FF pattern.
+      emit_ff_data(emit_ff_data, lhs_name, data_ref, "    ", nullptr, true);
     }
     os << "  end\n";
   }
@@ -337,35 +342,38 @@ void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const Exp
   std::string lhs_name(lhs);
   std::ostringstream decl_os;
   std::ostringstream stmt_os;
-  const std::string rhs = emit_expr_unpacked(lhs_name, nonblocking, expr_graph, id, names, decl_os,
-                                             stmt_os, indent, assumptions);
-  if (!rhs.empty()) {
-    stmt_os << indent << lhs_name << (nonblocking ? " <= " : " = ") << rhs << ";\n";
+  std::ostringstream assign_os;
+  const std::string inner_indent = std::string(indent) + "  ";
+  emit_expr_unpacked(lhs_name, nonblocking, expr_graph, id, names, decl_os, stmt_os, assign_os,
+                     inner_indent, assumptions);
+  const std::string decls = decl_os.str();
+  const std::string stmts = stmt_os.str();
+  const std::string assigns = assign_os.str();
+  if (!decls.empty() || !stmts.empty() || !assigns.empty()) {
+    os << indent << "begin\n";
+    os << decls;
+    os << stmts;
+    os << assigns;
+    os << indent << "end\n";
   }
-  os << decl_os.str();
-  os << stmt_os.str();
 }
 
-std::string
-VerilogEmitter::emit_expr_unpacked(std::string &lhs, bool nonblocking, const ExprGraph &expr_graph,
-                                   ExprId id, std::map<ExprId, std::string> &names,
-                                   std::ostream &decl_os, std::ostream &os, std::string_view indent,
-                                   const std::unordered_map<std::string, bool> *assumptions) const {
+void VerilogEmitter::emit_expr_unpacked(
+    std::string lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id,
+    std::map<ExprId, std::string> &names, std::ostream &decl_os, std::ostream &os,
+    std::ostream &assign_os, std::string_view indent,
+    const std::unordered_map<std::string, bool> *assumptions) const {
   if (id == kInvalidExprId) {
-    return "";
+    return;
   }
   const auto &node = expr_graph.nodes[id];
   switch (node.op) {
   case ExprGraph::Op::kSequence:
     for (ExprId operand : node.operands) {
-      std::string operand_lhs(lhs);
-      const std::string rhs = emit_expr_unpacked(operand_lhs, nonblocking, expr_graph, operand,
-                                                 names, decl_os, os, indent, assumptions);
-      if (!rhs.empty()) {
-        os << indent << operand_lhs << (nonblocking ? " <= " : " = ") << rhs << ";\n";
-      }
+      emit_expr_unpacked(lhs, nonblocking, expr_graph, operand, names, decl_os, os, assign_os,
+                         indent, assumptions);
     }
-    return "";
+    break;
   case ExprGraph::Op::kUnpackedAssign: {
     const ExprId next = node.operands[0];
     const ExprId base = node.operands[1];
@@ -379,43 +387,32 @@ VerilogEmitter::emit_expr_unpacked(std::string &lhs, bool nonblocking, const Exp
                                        assumptions);
     }
     selected_lhs << "]";
-    lhs = selected_lhs.str();
-    return emit_expr_unpacked(lhs, nonblocking, expr_graph, next, names, decl_os, os, indent,
-                              assumptions);
+    emit_expr_unpacked(selected_lhs.str(), nonblocking, expr_graph, next, names, decl_os, os,
+                       assign_os, indent, assumptions);
+    break;
   }
   case ExprGraph::Op::kMux: {
     bool assumed = false;
     if (lookup_assumed_condition(expr_graph, node.operands[0], assumptions, assumed)) {
-      std::string operand_lhs(lhs);
-      const std::string rhs =
-          emit_expr_unpacked(operand_lhs, nonblocking, expr_graph, node.operands[assumed ? 1 : 2],
-                             names, decl_os, os, indent, assumptions);
-      if (!rhs.empty()) {
-        os << indent << operand_lhs << (nonblocking ? " <= " : " = ") << rhs << ";\n";
-      }
-      return "";
+      emit_expr_unpacked(lhs, nonblocking, expr_graph, node.operands[assumed ? 1 : 2], names,
+                         decl_os, os, assign_os, indent, assumptions);
+      break;
     }
     const std::string cond =
         emit_expr_packed(expr_graph, node.operands[0], names, decl_os, os, indent, assumptions);
-    std::string then_lhs(lhs);
-    const std::string then_rhs =
-        emit_expr_unpacked(then_lhs, nonblocking, expr_graph, node.operands[1], names, decl_os, os,
-                           indent, assumptions);
-    std::string else_lhs(lhs);
-    const std::string else_rhs =
-        emit_expr_unpacked(else_lhs, nonblocking, expr_graph, node.operands[2], names, decl_os, os,
-                           indent, assumptions);
-    os << indent << "if (" << cond << ") begin\n";
     const std::string branch_indent = std::string(indent) + "  ";
-    if (!then_rhs.empty()) {
-      os << branch_indent << then_lhs << (nonblocking ? " <= " : " = ") << then_rhs << ";\n";
-    }
-    os << indent << "end else begin\n";
-    if (!else_rhs.empty()) {
-      os << branch_indent << else_lhs << (nonblocking ? " <= " : " = ") << else_rhs << ";\n";
-    }
-    os << indent << "end\n";
-    return "";
+    std::ostringstream then_assign_os;
+    emit_expr_unpacked(lhs, nonblocking, expr_graph, node.operands[1], names, decl_os, os,
+                       then_assign_os, branch_indent, assumptions);
+    std::ostringstream else_assign_os;
+    emit_expr_unpacked(lhs, nonblocking, expr_graph, node.operands[2], names, decl_os, os,
+                       else_assign_os, branch_indent, assumptions);
+    assign_os << indent << "if (" << cond << ") begin\n";
+    assign_os << then_assign_os.str();
+    assign_os << indent << "end else begin\n";
+    assign_os << else_assign_os.str();
+    assign_os << indent << "end\n";
+    break;
   }
   case ExprGraph::Op::kCase: {
     assert(!node.operands.empty());
@@ -425,8 +422,7 @@ VerilogEmitter::emit_expr_unpacked(std::string &lhs, bool nonblocking, const Exp
     const std::string branch_indent = std::string(indent) + "  ";
     struct CaseArm {
       std::string label;
-      std::string lhs;
-      std::string rhs;
+      std::string assignments;
     };
     std::vector<CaseArm> arms;
     size_t i = 1;
@@ -445,41 +441,43 @@ VerilogEmitter::emit_expr_unpacked(std::string &lhs, bool nonblocking, const Exp
         label << emit_expr_packed(expr_graph, node.operands[i], names, decl_os, os, indent,
                                   assumptions);
       }
-      std::string arm_lhs(lhs);
-      const std::string arm_rhs =
-          emit_expr_unpacked(arm_lhs, nonblocking, expr_graph, node.operands[i + 1], names, decl_os,
-                             os, indent, assumptions);
-      arms.push_back(CaseArm{label.str(), arm_lhs, arm_rhs});
+      std::ostringstream arm_assign_os;
+      emit_expr_unpacked(lhs, nonblocking, expr_graph, node.operands[i + 1], names, decl_os, os,
+                         arm_assign_os, branch_indent, assumptions);
+      arms.push_back(CaseArm{label.str(), arm_assign_os.str()});
       i += 2;
     }
-    std::string default_lhs(lhs);
-    std::string default_rhs;
+    std::ostringstream default_assign_os;
     if (i < node.operands.size()) {
-      default_rhs = emit_expr_unpacked(default_lhs, nonblocking, expr_graph, node.operands[i],
-                                       names, decl_os, os, indent, assumptions);
+      emit_expr_unpacked(lhs, nonblocking, expr_graph, node.operands[i], names, decl_os, os,
+                         default_assign_os, branch_indent, assumptions);
     }
-    os << indent << "case (" << selector << ")";
+    assign_os << indent << "case (" << selector << ")";
     if (!has_default) {
-      os << " // synopsys full_case";
+      assign_os << " // synopsys full_case";
     }
-    os << "\n";
+    assign_os << "\n";
     for (const CaseArm &arm : arms) {
-      os << indent << arm.label << ": begin\n";
-      if (!arm.rhs.empty()) {
-        os << branch_indent << arm.lhs << (nonblocking ? " <= " : " = ") << arm.rhs << ";\n";
-      }
-      os << indent << "end\n";
+      assign_os << indent << arm.label << ": begin\n";
+      assign_os << arm.assignments;
+      assign_os << indent << "end\n";
     }
-    if (!default_rhs.empty()) {
-      os << indent << "default: begin\n";
-      os << branch_indent << default_lhs << (nonblocking ? " <= " : " = ") << default_rhs << ";\n";
-      os << indent << "end\n";
+    if (!default_assign_os.str().empty()) {
+      assign_os << indent << "default: begin\n";
+      assign_os << default_assign_os.str();
+      assign_os << indent << "end\n";
     }
-    os << indent << "endcase\n";
-    return "";
+    assign_os << indent << "endcase\n";
+    break;
   }
-  default:
-    return emit_expr_packed(expr_graph, id, names, decl_os, os, indent, assumptions);
+  default: {
+    const std::string rhs =
+        emit_expr_packed(expr_graph, id, names, decl_os, os, indent, assumptions);
+    if (!rhs.empty()) {
+      assign_os << indent << lhs << (nonblocking ? " <= " : " = ") << rhs << ";\n";
+    }
+    break;
+  }
   }
 }
 

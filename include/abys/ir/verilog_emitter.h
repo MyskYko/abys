@@ -35,11 +35,10 @@ private:
   void emit_expr(std::string_view lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id,
                  std::ostream &os, std::string_view indent,
                  const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
-  std::string
-  emit_expr_unpacked(std::string &lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id,
-                     std::map<ExprId, std::string> &names, std::ostream &decl_os, std::ostream &os,
-                     std::string_view indent,
-                     const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
+  void emit_expr_unpacked(std::string lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id,
+                          std::map<ExprId, std::string> &names, std::ostream &decl_os,
+                          std::ostream &os, std::ostream &assign_os, std::string_view indent,
+                          const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
   std::string
   emit_expr_packed(const ExprGraph &expr_graph, ExprId id, std::map<ExprId, std::string> &names,
                    std::ostream &decl_os, std::ostream &os, std::string_view indent,
