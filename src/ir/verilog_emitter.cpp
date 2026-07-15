@@ -746,12 +746,17 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     return name;
   }
   case ExprGraph::Op::kCase: {
+    const bool has_default = node.operands.size() % 2 == 0;
     const std::string selector =
         emit_expr_packed(expr_graph, node.operands[0], names, decl_os, os, indent, assumptions);
     const std::string name = temp_name();
     declare_temp(node, name);
     const std::string branch_indent = std::string(indent) + "  ";
-    os << indent << "case (" << selector << ")\n";
+    struct CaseArm {
+      std::string label;
+      std::string data;
+    };
+    std::vector<CaseArm> arms;
     size_t i = 1;
     while (i + 1 < node.operands.size()) {
       const ExprId value_id = node.operands[i];
@@ -759,33 +764,42 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
       const std::string data_name =
           emit_expr_packed(expr_graph, data_id, names, decl_os, os, indent, assumptions);
       if (!data_name.empty()) {
-        os << indent;
+        std::ostringstream label;
         const auto &value_node = expr_graph.nodes[value_id];
         if (value_node.op == ExprGraph::Op::kList) {
           for (size_t k = 0; k < value_node.operands.size(); ++k) {
             if (k) {
-              os << ", ";
+              label << ", ";
             }
-            os << emit_expr_packed(expr_graph, value_node.operands[k], names, decl_os, os, indent,
-                                   assumptions);
+            label << emit_expr_packed(expr_graph, value_node.operands[k], names, decl_os, os,
+                                      indent, assumptions);
           }
         } else {
-          os << emit_expr_packed(expr_graph, value_id, names, decl_os, os, indent, assumptions);
+          label << emit_expr_packed(expr_graph, value_id, names, decl_os, os, indent, assumptions);
         }
-        os << ": begin\n";
-        os << branch_indent << name << " = " << data_name << ";\n";
-        os << indent << "end\n";
+        arms.push_back(CaseArm{label.str(), data_name});
       }
       i += 2;
     }
+    std::string default_data;
     if (i < node.operands.size()) {
-      const std::string data_name =
+      default_data =
           emit_expr_packed(expr_graph, node.operands[i], names, decl_os, os, indent, assumptions);
-      if (!data_name.empty()) {
-        os << indent << "default: begin\n";
-        os << branch_indent << name << " = " << data_name << ";\n";
-        os << indent << "end\n";
-      }
+    }
+    os << indent << "case (" << selector << ")";
+    if (!has_default) {
+      os << " // synopsys full_case";
+    }
+    os << "\n";
+    for (const CaseArm &arm : arms) {
+      os << indent << arm.label << ": begin\n";
+      os << branch_indent << name << " = " << arm.data << ";\n";
+      os << indent << "end\n";
+    }
+    if (!default_data.empty()) {
+      os << indent << "default: begin\n";
+      os << branch_indent << name << " = " << default_data << ";\n";
+      os << indent << "end\n";
     }
     os << indent << "endcase\n";
     names[id] = name;
