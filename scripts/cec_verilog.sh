@@ -42,6 +42,7 @@ memory
 opt
 techmap
 opt
+delete t:$print
 EOF
 )"
 
