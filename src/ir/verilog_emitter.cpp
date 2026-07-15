@@ -181,7 +181,8 @@ void VerilogEmitter::emit_combinational(const Module &module, std::ostream &os) 
       os << "  always @(*) begin\n";
       for (size_t i = 0; i < node.outputs.size(); ++i) {
         if (!node.outputs[i].name.empty()) { // skip convert (already handled above)
-          emit_expr(node.outputs[i].name, false, node.expr_graph, node.expr_roots[i], os, "    ");
+          emit_expr(node.outputs[i].name, false, false, node.expr_graph, node.expr_roots[i], os,
+                    "    ");
         }
       }
       os << "  end\n";
@@ -195,8 +196,8 @@ void VerilogEmitter::emit_combinational(const Module &module, std::ostream &os) 
           assert(input.node_id < module.nodes.size());
           assert(input.port_idx < input_node.expr_roots.size());
           if (input_node.kind == Module::NodeKind::kOp) {
-            emit_expr(name, false, input_node.expr_graph, input_node.expr_roots[input.port_idx], os,
-                      "    ");
+            emit_expr(name, false, false, input_node.expr_graph,
+                      input_node.expr_roots[input.port_idx], os, "    ");
           } else {
             // TODO: handle multi_driver
           }
@@ -233,24 +234,24 @@ void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) con
   const auto emit_ff_data = [&](const auto &self, std::string_view lhs,
                                 const Module::EdgeRef &data_ref, std::string_view indent,
                                 const std::unordered_map<std::string, bool> *assumptions,
-                                bool nonblocking) -> void {
+                                bool is_nonblocking, bool is_merge) -> void {
     assert(data_ref.node_id < module.nodes.size());
     const auto &data_node = module.nodes[data_ref.node_id];
     const std::string data_name = data_node.outputs[data_ref.port_idx].name;
     if (!data_name.empty()) {
-      os << indent << lhs << (nonblocking ? " <= " : " = ") << data_name << ";\n";
+      os << indent << lhs << ((is_nonblocking && !is_merge) ? " <= " : " = ") << data_name << ";\n";
       return;
     }
     if (data_node.kind == Module::NodeKind::kOp) {
       assert(data_ref.port_idx < data_node.expr_roots.size());
-      emit_expr(lhs, nonblocking, data_node.expr_graph, data_node.expr_roots[data_ref.port_idx], os,
-                indent, assumptions);
+      emit_expr(lhs, is_nonblocking, is_merge, data_node.expr_graph,
+                data_node.expr_roots[data_ref.port_idx], os, indent, assumptions);
       return;
     }
     assert(data_node.kind == Module::NodeKind::kMerge);
     for (const auto &input : data_node.inputs) {
       // Merge expansion needs blocking assignments to accumulate writes within this block.
-      self(self, lhs, input, indent, assumptions, false);
+      self(self, lhs, input, indent, assumptions, is_nonblocking, true);
     }
   };
   for (Tig::NodeId ff_id = 0; ff_id < module.nodes.size(); ++ff_id) {
@@ -289,14 +290,14 @@ void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) con
       os << "    if (" << ((node.rst_edge == EdgeKind::kNegedge) ? "!" : "") << rst_name
          << ") begin\n";
       // Emit top-level FF writes as NBA so Yosys can prove the sequential memory/FF pattern.
-      emit_ff_data(emit_ff_data, lhs_name, data_ref, "      ", &reset_assumptions, true);
+      emit_ff_data(emit_ff_data, lhs_name, data_ref, "      ", &reset_assumptions, true, false);
       os << "    end else begin\n";
       // Emit top-level FF writes as NBA so Yosys can prove the sequential memory/FF pattern.
-      emit_ff_data(emit_ff_data, lhs_name, data_ref, "      ", &clock_assumptions, true);
+      emit_ff_data(emit_ff_data, lhs_name, data_ref, "      ", &clock_assumptions, true, false);
       os << "    end\n";
     } else {
       // Emit top-level FF writes as NBA so Yosys can prove the sequential memory/FF pattern.
-      emit_ff_data(emit_ff_data, lhs_name, data_ref, "    ", nullptr, true);
+      emit_ff_data(emit_ff_data, lhs_name, data_ref, "    ", nullptr, true, false);
     }
     os << "  end\n";
   }
@@ -335,8 +336,9 @@ bool VerilogEmitter::lookup_assumed_condition(
   return false;
 }
 
-void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const ExprGraph &expr_graph,
-                               ExprId id, std::ostream &os, std::string_view indent,
+void VerilogEmitter::emit_expr(std::string_view lhs, bool is_nonblocking, bool is_merge,
+                               const ExprGraph &expr_graph, ExprId id, std::ostream &os,
+                               std::string_view indent,
                                const std::unordered_map<std::string, bool> *assumptions) const {
   std::map<ExprId, std::string> names;
   std::string lhs_name(lhs);
@@ -344,8 +346,8 @@ void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const Exp
   std::ostringstream stmt_os;
   std::ostringstream assign_os;
   const std::string inner_indent = std::string(indent) + "  ";
-  emit_expr_unpacked(lhs_name, nonblocking, expr_graph, id, names, decl_os, stmt_os, assign_os,
-                     inner_indent, assumptions);
+  emit_expr_unpacked(lhs_name, is_nonblocking, is_merge, expr_graph, id, names, decl_os, stmt_os,
+                     assign_os, inner_indent, assumptions);
   const std::string decls = decl_os.str();
   const std::string stmts = stmt_os.str();
   const std::string assigns = assign_os.str();
@@ -359,7 +361,7 @@ void VerilogEmitter::emit_expr(std::string_view lhs, bool nonblocking, const Exp
 }
 
 void VerilogEmitter::emit_expr_unpacked(
-    std::string lhs, bool nonblocking, const ExprGraph &expr_graph, ExprId id,
+    std::string lhs, bool is_nonblocking, bool is_merge, const ExprGraph &expr_graph, ExprId id,
     std::map<ExprId, std::string> &names, std::ostream &decl_os, std::ostream &os,
     std::ostream &assign_os, std::string_view indent,
     const std::unordered_map<std::string, bool> *assumptions) const {
@@ -370,8 +372,8 @@ void VerilogEmitter::emit_expr_unpacked(
   switch (node.op) {
   case ExprGraph::Op::kSequence:
     for (ExprId operand : node.operands) {
-      emit_expr_unpacked(lhs, nonblocking, expr_graph, operand, names, decl_os, os, assign_os,
-                         indent, assumptions);
+      emit_expr_unpacked(lhs, is_nonblocking, is_merge, expr_graph, operand, names, decl_os, os,
+                         assign_os, indent, assumptions);
     }
     break;
   case ExprGraph::Op::kUnpackedAssign: {
@@ -387,26 +389,26 @@ void VerilogEmitter::emit_expr_unpacked(
                                        assumptions);
     }
     selected_lhs << "]";
-    emit_expr_unpacked(selected_lhs.str(), nonblocking, expr_graph, next, names, decl_os, os,
-                       assign_os, indent, assumptions);
+    emit_expr_unpacked(selected_lhs.str(), is_nonblocking, false, expr_graph, next, names, decl_os,
+                       os, assign_os, indent, assumptions);
     break;
   }
   case ExprGraph::Op::kMux: {
     bool assumed = false;
     if (lookup_assumed_condition(expr_graph, node.operands[0], assumptions, assumed)) {
-      emit_expr_unpacked(lhs, nonblocking, expr_graph, node.operands[assumed ? 1 : 2], names,
-                         decl_os, os, assign_os, indent, assumptions);
+      emit_expr_unpacked(lhs, is_nonblocking, is_merge, expr_graph, node.operands[assumed ? 1 : 2],
+                         names, decl_os, os, assign_os, indent, assumptions);
       break;
     }
     const std::string cond =
         emit_expr_packed(expr_graph, node.operands[0], names, decl_os, os, indent, assumptions);
     const std::string branch_indent = std::string(indent) + "  ";
     std::ostringstream then_assign_os;
-    emit_expr_unpacked(lhs, nonblocking, expr_graph, node.operands[1], names, decl_os, os,
-                       then_assign_os, branch_indent, assumptions);
+    emit_expr_unpacked(lhs, is_nonblocking, is_merge, expr_graph, node.operands[1], names, decl_os,
+                       os, then_assign_os, branch_indent, assumptions);
     std::ostringstream else_assign_os;
-    emit_expr_unpacked(lhs, nonblocking, expr_graph, node.operands[2], names, decl_os, os,
-                       else_assign_os, branch_indent, assumptions);
+    emit_expr_unpacked(lhs, is_nonblocking, is_merge, expr_graph, node.operands[2], names, decl_os,
+                       os, else_assign_os, branch_indent, assumptions);
     assign_os << indent << "if (" << cond << ") begin\n";
     assign_os << then_assign_os.str();
     assign_os << indent << "end else begin\n";
@@ -442,15 +444,15 @@ void VerilogEmitter::emit_expr_unpacked(
                                   assumptions);
       }
       std::ostringstream arm_assign_os;
-      emit_expr_unpacked(lhs, nonblocking, expr_graph, node.operands[i + 1], names, decl_os, os,
-                         arm_assign_os, branch_indent, assumptions);
+      emit_expr_unpacked(lhs, is_nonblocking, is_merge, expr_graph, node.operands[i + 1], names,
+                         decl_os, os, arm_assign_os, branch_indent, assumptions);
       arms.push_back(CaseArm{label.str(), arm_assign_os.str()});
       i += 2;
     }
     std::ostringstream default_assign_os;
     if (i < node.operands.size()) {
-      emit_expr_unpacked(lhs, nonblocking, expr_graph, node.operands[i], names, decl_os, os,
-                         default_assign_os, branch_indent, assumptions);
+      emit_expr_unpacked(lhs, is_nonblocking, is_merge, expr_graph, node.operands[i], names,
+                         decl_os, os, default_assign_os, branch_indent, assumptions);
     }
     assign_os << indent << "case (" << selector << ")";
     if (!has_default) {
@@ -474,7 +476,8 @@ void VerilogEmitter::emit_expr_unpacked(
     const std::string rhs =
         emit_expr_packed(expr_graph, id, names, decl_os, os, indent, assumptions);
     if (!rhs.empty()) {
-      assign_os << indent << lhs << (nonblocking ? " <= " : " = ") << rhs << ";\n";
+      assign_os << indent << lhs << ((is_nonblocking && !is_merge) ? " <= " : " = ") << rhs
+                << ";\n";
     }
     break;
   }
