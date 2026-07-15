@@ -589,7 +589,12 @@ void lower_lhs_assignment(
                         const ExprId current_id) -> ExprId {
     if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
       if (lhs.type->isUnpackedArray()) {
-        return expr_builder.create_sequence(current_id, expr_id);
+        ExprId sequence_id = kInvalidExprId;
+        if (current_id != kInvalidExprId &&
+            expr_builder.get_node(current_id).op == ExprGraph::Op::kSequence) {
+          sequence_id = current_id;
+        }
+        return expr_builder.create_sequence(sequence_id, expr_id);
       }
       return expr_id;
     }

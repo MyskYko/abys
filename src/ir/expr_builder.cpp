@@ -522,11 +522,8 @@ ExprId ExprBuilder::create_sequence(ExprId current, ExprId next) {
   SignalWidth width;
   if (current != kInvalidExprId) {
     const auto &current_node = get_node(current);
-    if (current_node.op == ExprGraph::Op::kSequence) {
-      operands = current_node.operands;
-    } else {
-      operands.push_back(current);
-    }
+    assert(current_node.op == ExprGraph::Op::kSequence);
+    operands = current_node.operands;
     width = current_node.width;
     assert(get_node(next).width == width);
   } else {
