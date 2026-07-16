@@ -73,7 +73,7 @@ struct Tig {
       bool sign = false;
     };
 
-    struct PackedVariable {
+    struct UnpackedVariable {
       VariableKind kind = VariableKind::kUnknown;
       std::string name;
       std::vector<SignalWidth> dims;
@@ -96,7 +96,7 @@ struct Tig {
     std::vector<Port> output_ports;
     std::vector<Node> nodes;
     std::vector<Variable> variables;
-    std::vector<PackedVariable> packed_variables;
+    std::vector<UnpackedVariable> unpacked_variables;
     std::unordered_map<std::string, EdgeRef> signal_map; // TOOD: move to builder?
     std::vector<PendingFf> pending_ffs;                  // TOOD: move to builder?
   };

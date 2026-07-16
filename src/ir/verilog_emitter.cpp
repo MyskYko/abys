@@ -93,7 +93,7 @@ void VerilogEmitter::emit_signal_decls(const Module &module, std::ostream &os) c
     }
     os << var.name << ";\n";
   }
-  for (const auto &var : module.packed_variables) {
+  for (const auto &var : module.unpacked_variables) {
     if (port_names.count(var.name)) {
       continue;
     }
@@ -823,7 +823,7 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     os << indent << name << " = " << current << ";\n";
     os << indent << name << "[" << base;
     if (slice_width_id != expr_graph.constant_one) {
-      os << " -: " << slice_width;
+      os << " +: " << slice_width;
     }
     os << "] = " << next << ";\n";
     names[id] = name;
@@ -1101,29 +1101,18 @@ void VerilogEmitter::emit_expr_inline(
     const ExprId base = node.operands[2];
     const ExprId slice_width = node.operands[3];
     const SignalWidth width = node.width;
-    auto emit_low_base = [&]() {
-      if (slice_width == expr_graph.constant_one) {
-        emit_expr_inline(expr_graph, base, lhs, os, assumptions);
-        return;
-      }
-      os << "(";
-      emit_expr_inline(expr_graph, base, lhs, os, assumptions);
-      os << " - (";
-      emit_expr_inline(expr_graph, slice_width, lhs, os, assumptions);
-      os << " - 1))";
-    };
     os << "((";
     emit_expr_inline(expr_graph, current, lhs, os, assumptions);
     os << " & ~(({" << width << "{1'b1}} >> (" << width << " - ";
     emit_expr_inline(expr_graph, slice_width, lhs, os, assumptions);
     os << ")) << (";
-    emit_low_base();
+    emit_expr_inline(expr_graph, base, lhs, os, assumptions);
     os << "))) | ((";
     emit_expr_inline(expr_graph, next, lhs, os, assumptions);
     os << " & ({" << width << "{1'b1}} >> (" << width << " - ";
     emit_expr_inline(expr_graph, slice_width, lhs, os, assumptions);
     os << "))) << (";
-    emit_low_base();
+    emit_expr_inline(expr_graph, base, lhs, os, assumptions);
     os << ")))";
     return;
   }

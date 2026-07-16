@@ -271,8 +271,7 @@ ExprId ExprBuilder::create_preinc(ExprId operand) {
       ExprId base = node.operands[0];
       ExprId index = node.operands[1];
       const auto &base_node = get_node(base);
-      updated = create_masked_assign(base, updated, index, get_constant_one(), base_node.width,
-                                     base_node.sign);
+      updated = create_masked_assign(base, updated, index, 1, base_node.width, base_node.sign);
       cursor = base;
       continue;
     }
@@ -280,8 +279,8 @@ ExprId ExprBuilder::create_preinc(ExprId operand) {
       ExprId base = node.operands[0];
       ExprId pos = node.operands[1];
       const auto &base_node = get_node(base);
-      updated = create_masked_assign(base, updated, pos, find_or_create_const(node.width),
-                                     base_node.width, base_node.sign);
+      updated =
+          create_masked_assign(base, updated, pos, node.width, base_node.width, base_node.sign);
       cursor = base;
       continue;
     }
@@ -550,15 +549,16 @@ ExprId ExprBuilder::create_unpacked_assign(ExprId next, ExprId base, ExprId slic
   return id;
 }
 ExprId ExprBuilder::create_masked_assign(ExprId current, ExprId next, ExprId base,
-                                         ExprId slice_width, SignalWidth width, bool sign) {
+                                         SignalWidth slice_width, SignalWidth width, bool sign) {
   assert(current != kInvalidExprId);
+  assert(slice_width > 0);
+  const ExprId slice_width_id = find_or_create_const(slice_width);
   const ExprId id = create_node();
   auto &node = get_node(id);
   node.op = ExprGraph::Op::kMaskedAssign;
   node.width = width;
   node.sign = sign;
-  assert(get_node(slice_width).op == ExprGraph::Op::kConst);
-  node.operands = {current, next, base, slice_width};
+  node.operands = {current, next, base, slice_width_id};
   return id;
 }
 
@@ -594,42 +594,6 @@ ExprId ExprBuilder::unpacked_assign_part_select(ExprId next, ExprId base, Signal
   ExprId pos = normalize_index_expr(left, msb, lsb);
   ExprId width_id = find_or_create_const(slice_width);
   return create_unpacked_assign(next, pos, width_id, width, sign);
-}
-
-ExprId ExprBuilder::assign_select(ExprId current, ExprId next, ExprId index, BitIndex msb,
-                                  BitIndex lsb) {
-  const auto &node = get_node(current);
-  ExprId pos = normalize_index_expr(index, msb, lsb);
-  return create_masked_assign(current, next, pos, get_constant_one(), node.width, node.sign);
-}
-ExprId ExprBuilder::assign_range(ExprId current, ExprId next, BitIndex left, BitIndex right,
-                                 BitIndex msb, BitIndex lsb) {
-  const auto &node = get_node(current);
-  BitIndex left_pos = normalize_index(left, msb, lsb);
-  BitIndex right_pos = normalize_index(right, msb, lsb);
-  if (left_pos < right_pos) {
-    next = create_reverse(next);
-    std::swap(left_pos, right_pos);
-  }
-  ExprId left_id = find_or_create_const(left_pos);
-  ExprId width_id = find_or_create_const(left_pos - right_pos + 1);
-  return create_masked_assign(current, next, left_id, width_id, node.width, node.sign);
-}
-ExprId ExprBuilder::assign_part_select(ExprId current, ExprId next, ExprId base,
-                                       SignalWidth slice_width, bool dir, BitIndex msb,
-                                       BitIndex lsb) {
-  const auto &node = get_node(current);
-  ExprId left = base;
-  if (dir) {
-    next = create_reverse(next);
-    assert(slice_width > 0);
-    // TODO: not sure about bitwidth and signedness
-    const ExprId offset = find_or_create_const(slice_width - 1);
-    left = create_add(base, offset);
-  }
-  ExprId pos = normalize_index_expr(left, msb, lsb);
-  ExprId width_id = find_or_create_const(slice_width);
-  return create_masked_assign(current, next, pos, width_id, node.width, node.sign);
 }
 
 ExprId ExprBuilder::create_call(const void *subr_ptr, std::string name,

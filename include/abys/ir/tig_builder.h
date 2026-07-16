@@ -54,8 +54,8 @@ public:
 
   void create_variable(ModuleId module_id, std::string name, SignalWidth width, bool sign,
                        bool wire, bool reg);
-  void create_packed_variable(ModuleId module_id, std::string name, std::vector<SignalWidth> dims,
-                              SignalWidth width, bool sign, bool wire, bool reg);
+  void create_unpacked_variable(ModuleId module_id, std::string name, std::vector<SignalWidth> dims,
+                                SignalWidth width, bool sign, bool wire, bool reg);
 
   NodeId create_instance(ModuleId module_id, std::string name, ModuleId instance_module_id);
   NodeId create_operation(ModuleId module_id);

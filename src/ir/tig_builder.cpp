@@ -106,9 +106,9 @@ void TigBuilder::create_variable(ModuleId module_id, std::string name, SignalWid
   module.variables.push_back({kind, std::move(name), width, sign});
 }
 
-void TigBuilder::create_packed_variable(ModuleId module_id, std::string name,
-                                        std::vector<SignalWidth> dims, SignalWidth width, bool sign,
-                                        bool wire, bool reg) {
+void TigBuilder::create_unpacked_variable(ModuleId module_id, std::string name,
+                                          std::vector<SignalWidth> dims, SignalWidth width,
+                                          bool sign, bool wire, bool reg) {
   Module &module = design_.modules[module_id];
   Module::VariableKind kind = Module::VariableKind::kLogic;
   assert(!wire || !reg);
@@ -117,7 +117,7 @@ void TigBuilder::create_packed_variable(ModuleId module_id, std::string name,
   } else if (reg) {
     kind = Module::VariableKind::kReg;
   }
-  module.packed_variables.push_back({kind, std::move(name), std::move(dims), width, sign});
+  module.unpacked_variables.push_back({kind, std::move(name), std::move(dims), width, sign});
 }
 
 TigBuilder::NodeId TigBuilder::create_instance(ModuleId module_id, std::string name,
