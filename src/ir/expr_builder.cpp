@@ -461,8 +461,8 @@ ExprId ExprBuilder::create_select(ExprId data, ExprId index, BitIndex msb, BitIn
 ExprId ExprBuilder::create_reverse(ExprId data) {
   return create_unary(ExprGraph::Op::kReverse, data);
 }
-ExprId ExprBuilder::create_range(ExprId data, BitIndex left, BitIndex right, BitIndex msb,
-                                 BitIndex lsb) {
+ExprId ExprBuilder::create_simple_range(ExprId data, BitIndex left, BitIndex right, BitIndex msb,
+                                        BitIndex lsb) {
   BitIndex left_pos = normalize_index(left, msb, lsb);
   BitIndex right_pos = normalize_index(right, msb, lsb);
   bool is_reverse = false;
@@ -470,7 +470,7 @@ ExprId ExprBuilder::create_range(ExprId data, BitIndex left, BitIndex right, Bit
     is_reverse = true;
     std::swap(left_pos, right_pos);
   }
-  const ExprId pos = find_or_create_const(left_pos);
+  const ExprId pos = find_or_create_const(right_pos);
   const ExprId id = create_node();
   auto &node = get_node(id);
   node.op = ExprGraph::Op::kRange;
@@ -482,26 +482,14 @@ ExprId ExprBuilder::create_range(ExprId data, BitIndex left, BitIndex right, Bit
   }
   return id;
 }
-ExprId ExprBuilder::create_part_select(ExprId data, ExprId base, SignalWidth width, bool dir,
-                                       BitIndex msb, BitIndex lsb) {
-  ExprId left = base;
-  if (dir) {
-    assert(width > 0);
-    assert(width <= static_cast<SignalWidth>(std::numeric_limits<BitIndex>::max()));
-    // TODO: not sure about bitwidth and signedness
-    const ExprId offset = find_or_create_const(width - 1);
-    left = create_add(base, offset);
-  }
-  ExprId pos = normalize_index_expr(left, msb, lsb);
+ExprId ExprBuilder::create_range(ExprId data, ExprId base, SignalWidth width, bool sign) {
+  assert(width > 0);
   const ExprId id = create_node();
   auto &node = get_node(id);
   node.op = ExprGraph::Op::kRange;
   node.width = width;
-  node.sign = false;
-  node.operands = {data, pos};
-  if (dir) {
-    return create_reverse(id);
-  }
+  node.sign = sign;
+  node.operands = {data, base};
   return id;
 }
 
@@ -576,24 +564,35 @@ ExprId ExprBuilder::unpacked_assign_range(ExprId next, BitIndex left, BitIndex r
     next = create_reverse(next);
     std::swap(left_pos, right_pos);
   }
-  ExprId left_id = find_or_create_const(left_pos);
-  ExprId width_id = find_or_create_const(left_pos - right_pos + 1);
-  return create_unpacked_assign(next, left_id, width_id, width, sign);
+  const ExprId base_id = find_or_create_const(right_pos);
+  const ExprId width_id = find_or_create_const(left_pos - right_pos + 1);
+  return create_unpacked_assign(next, base_id, width_id, width, sign);
 }
 
 ExprId ExprBuilder::unpacked_assign_part_select(ExprId next, ExprId base, SignalWidth slice_width,
                                                 bool dir, BitIndex msb, BitIndex lsb,
                                                 SignalWidth width, bool sign) {
-  ExprId left = base;
-  if (dir) {
+  assert(slice_width > 0);
+  assert(slice_width <= static_cast<SignalWidth>(std::numeric_limits<BitIndex>::max()));
+  ExprId low = base;
+  if (msb < lsb) {
     next = create_reverse(next);
-    assert(slice_width > 0);
-    const ExprId offset = find_or_create_const(slice_width - 1);
-    left = create_add(base, offset);
   }
-  ExprId pos = normalize_index_expr(left, msb, lsb);
-  ExprId width_id = find_or_create_const(slice_width);
-  return create_unpacked_assign(next, pos, width_id, width, sign);
+  if (slice_width > 1) {
+    const ExprId offset = find_or_create_const(slice_width - 1);
+    if (dir) {
+      if (msb < lsb) {
+        low = create_add(base, offset);
+      }
+    } else {
+      if (msb >= lsb) {
+        low = create_sub(base, offset);
+      }
+    }
+  }
+  const ExprId base_id = normalize_index_expr(low, msb, lsb);
+  const ExprId width_id = find_or_create_const(slice_width);
+  return create_unpacked_assign(next, base_id, width_id, width, sign);
 }
 
 ExprId ExprBuilder::create_call(const void *subr_ptr, std::string name,

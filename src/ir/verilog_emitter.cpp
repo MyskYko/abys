@@ -384,7 +384,7 @@ void VerilogEmitter::emit_expr_unpacked(
     selected_lhs << lhs << "["
                  << emit_expr_packed(expr_graph, base, names, decl_os, os, indent, assumptions);
     if (slice_width != expr_graph.constant_one) {
-      selected_lhs << " -: "
+      selected_lhs << " +: "
                    << emit_expr_packed(expr_graph, slice_width, names, decl_os, os, indent,
                                        assumptions);
     }
@@ -671,13 +671,13 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
   case ExprGraph::Op::kRange: {
     const std::string data =
         emit_expr_packed(expr_graph, node.operands[0], names, decl_os, os, indent, assumptions);
-    const std::string high =
+    const std::string base =
         emit_expr_packed(expr_graph, node.operands[1], names, decl_os, os, indent, assumptions);
     const std::string name = temp_name();
     declare_temp(node, name);
-    os << indent << name << " = " << data << "[" << high;
+    os << indent << name << " = " << data << "[" << base;
     if (node.width > 1) {
-      os << " -: " << node.width;
+      os << " +: " << node.width;
     }
     os << "];\n";
     names[id] = name;
@@ -1064,17 +1064,17 @@ void VerilogEmitter::emit_expr_inline(
   }
   case ExprGraph::Op::kRange: {
     const ExprId data_id = node.operands[0];
-    const ExprId high_id = node.operands[1];
+    const ExprId base_id = node.operands[1];
     if (!kUseShiftMaskForExpressionSelects || can_emit_direct_range_base(expr_graph, data_id)) {
       emit_expr_inline(expr_graph, data_id, lhs, os, assumptions);
       os << "[";
-      emit_expr_inline(expr_graph, high_id, lhs, os, assumptions);
+      emit_expr_inline(expr_graph, base_id, lhs, os, assumptions);
       if (node.width > 1) {
-        os << " -: " << node.width;
+        os << " +: " << node.width;
       }
       os << "]";
     } else {
-      emit_shifted_range(expr_graph, data_id, high_id, node.width, lhs, os, assumptions);
+      emit_shifted_range(expr_graph, data_id, base_id, node.width, lhs, os, assumptions);
     }
     return;
   }
@@ -1131,17 +1131,14 @@ bool VerilogEmitter::can_emit_direct_range_base(const ExprGraph &expr_graph, Exp
 }
 
 void VerilogEmitter::emit_shifted_range(
-    const ExprGraph &expr_graph, ExprId data_id, ExprId high_id, SignalWidth width,
+    const ExprGraph &expr_graph, ExprId data_id, ExprId base_id, SignalWidth width,
     std::string_view lhs, std::ostream &os,
     const std::unordered_map<std::string, bool> *assumptions) const {
   assert(width > 0);
   os << "((";
   emit_expr_inline(expr_graph, data_id, lhs, os, assumptions);
   os << " >> (";
-  emit_expr_inline(expr_graph, high_id, lhs, os, assumptions);
-  if (width > 1) {
-    os << " - " << (width - 1);
-  }
+  emit_expr_inline(expr_graph, base_id, lhs, os, assumptions);
   os << ")) & ";
   if (width == 1) {
     os << "1'b1";

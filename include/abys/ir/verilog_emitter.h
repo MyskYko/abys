@@ -51,7 +51,7 @@ private:
                                 const std::unordered_map<std::string, bool> *assumptions,
                                 bool &value) const;
   bool can_emit_direct_range_base(const ExprGraph &expr_graph, ExprId id) const;
-  void emit_shifted_range(const ExprGraph &expr_graph, ExprId data_id, ExprId high_id,
+  void emit_shifted_range(const ExprGraph &expr_graph, ExprId data_id, ExprId base_id,
                           SignalWidth width, std::string_view lhs, std::ostream &os,
                           const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
 };

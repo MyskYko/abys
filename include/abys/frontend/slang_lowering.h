@@ -314,7 +314,7 @@ public:
       const BitIndex left_sw = extract_constant_index(left);
       const BitIndex right_sw = extract_constant_index(right);
       expr_stack_.push_back(
-          builder_.create_range(data, left_sw, right_sw, range.left, range.right));
+          builder_.create_simple_range(data, left_sw, right_sw, range.left, range.right));
     } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
                kind == slang::ast::RangeSelectionKind::IndexedDown) {
       const BitIndex width = extract_constant_index(right);
@@ -323,8 +323,34 @@ public:
       const ExprId base = expr_stack_.back();
       expr_stack_.pop_back();
       const bool dir = (kind == slang::ast::RangeSelectionKind::IndexedUp);
-      expr_stack_.push_back(
-          builder_.create_part_select(data, base, width, dir, range.left, range.right));
+      SignalWidth selected_width;
+      bool selected_sign;
+      get_width_sign(*expr.type, selected_width, selected_sign);
+      const SignalWidth data_width = builder_.get_width(data);
+      ExprId low = base;
+      if (selected_width > 1) {
+        const ExprId offset = builder_.find_or_create_const(selected_width - 1);
+        if (dir) {
+          if (range.left < range.right) {
+            low = builder_.create_add(base, offset);
+          }
+        } else {
+          if (range.left >= range.right) {
+            low = builder_.create_sub(base, offset);
+          }
+        }
+      }
+      const ExprId pos = builder_.normalize_index_expr(low, range.left, range.right);
+      bool is_full_width = false;
+      if (selected_width == data_width) {
+        const auto pos_value = builder_.try_evaluate(pos);
+        is_full_width = pos_value && *pos_value == 0;
+      }
+      if (is_full_width) {
+        expr_stack_.push_back(data);
+      } else {
+        expr_stack_.push_back(builder_.create_range(data, pos, selected_width, selected_sign));
+      }
     } else {
       throw std::logic_error("Unsupported range selection kind");
     }
@@ -567,8 +593,8 @@ void lower_lhs_assignment(
     if (width != rhs_width) {
       const BitIndex left = remaining - 1;
       const BitIndex right = remaining - width;
-      expr_id =
-          expr_builder.create_range(rhs_id, left, right, static_cast<BitIndex>(rhs_width - 1), 0);
+      expr_id = expr_builder.create_simple_range(
+          rhs_id, left, right, static_cast<BitIndex>(rhs_width - 1), 0);
     }
     remaining -= width;
     return expr_id;
