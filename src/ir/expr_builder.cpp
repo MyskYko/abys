@@ -267,7 +267,7 @@ ExprId ExprBuilder::create_preinc(ExprId operand) {
   ExprId cursor = operand;
   while (true) {
     const auto &node = get_node(cursor);
-    if (node.op == ExprGraph::Op::kArraySelect) {
+    if (node.op == ExprGraph::Op::kUnpackedSelect) {
       ExprId base = node.operands[0];
       ExprId index = node.operands[1];
       const auto &base_node = get_node(base);
@@ -618,12 +618,12 @@ ExprId ExprBuilder::create_both_edge(ExprId operand) {
   return id;
 }
 
-ExprId ExprBuilder::create_array_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb,
-                                        SignalWidth width, bool sign) {
+ExprId ExprBuilder::create_unpacked_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb,
+                                           SignalWidth width, bool sign) {
   const ExprId pos = normalize_index_expr(index, msb, lsb);
   const ExprId id = create_node();
   auto &node = get_node(id);
-  node.op = ExprGraph::Op::kArraySelect;
+  node.op = ExprGraph::Op::kUnpackedSelect;
   node.width = width;
   node.sign = sign;
   node.operands = {data, pos};
@@ -879,7 +879,7 @@ std::optional<int> ExprBuilder::try_evaluate(ExprId id) const {
   case ExprGraph::Op::kMaskedAssign:
   case ExprGraph::Op::kReverse:
   case ExprGraph::Op::kRange:
-  case ExprGraph::Op::kArraySelect:
+  case ExprGraph::Op::kUnpackedSelect:
   case ExprGraph::Op::kBothEdge:
   case ExprGraph::Op::kCall:
     return std::nullopt;
@@ -1012,7 +1012,7 @@ int ExprBuilder::evaluate(ExprId id) const {
   case ExprGraph::Op::kMaskedAssign:
   case ExprGraph::Op::kReverse:
   case ExprGraph::Op::kRange:
-  case ExprGraph::Op::kArraySelect:
+  case ExprGraph::Op::kUnpackedSelect:
   case ExprGraph::Op::kBothEdge:
   case ExprGraph::Op::kCall:
     assert(0);

@@ -45,7 +45,7 @@ struct ExprGraph {
     kMaskedAssign,
     kReverse,
     kRange,
-    kArraySelect,
+    kUnpackedSelect,
     kBothEdge,
     kCall,
   };

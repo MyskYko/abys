@@ -683,7 +683,7 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     names[id] = name;
     return name;
   }
-  case ExprGraph::Op::kArraySelect: {
+  case ExprGraph::Op::kUnpackedSelect: {
     const std::string data =
         emit_expr_packed(expr_graph, node.operands[0], names, decl_os, os, indent, assumptions);
     const std::string index =
@@ -1078,7 +1078,7 @@ void VerilogEmitter::emit_expr_inline(
     }
     return;
   }
-  case ExprGraph::Op::kArraySelect:
+  case ExprGraph::Op::kUnpackedSelect:
     emit_expr_inline(expr_graph, node.operands[0], lhs, os, assumptions);
     os << "[";
     emit_expr_inline(expr_graph, node.operands[1], lhs, os, assumptions);
@@ -1127,7 +1127,7 @@ bool VerilogEmitter::can_emit_direct_range_base(const ExprGraph &expr_graph, Exp
     return false;
   }
   const auto &node = expr_graph.nodes[id];
-  return node.op == ExprGraph::Op::kInput || node.op == ExprGraph::Op::kArraySelect;
+  return node.op == ExprGraph::Op::kInput || node.op == ExprGraph::Op::kUnpackedSelect;
 }
 
 void VerilogEmitter::emit_shifted_range(

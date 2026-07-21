@@ -282,7 +282,8 @@ public:
       SignalWidth width;
       bool sign;
       get_width_sign(elem, width, sign);
-      ExprId id = builder_.create_array_select(data, index, range.left, range.right, width, sign);
+      ExprId id =
+          builder_.create_unpacked_select(data, index, range.left, range.right, width, sign);
       expr_stack_.push_back(id);
     } else {
       const auto range = type.getFixedRange();

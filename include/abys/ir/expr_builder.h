@@ -101,8 +101,8 @@ public:
   ExprId unpacked_assign_part_select(ExprId next, ExprId base, SignalWidth slice_width, bool dir,
                                      BitIndex msb, BitIndex lsb, SignalWidth width, bool sign);
 
-  ExprId create_array_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb,
-                             SignalWidth width, bool sign);
+  ExprId create_unpacked_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb,
+                                SignalWidth width, bool sign);
 
   ExprId create_call(const void *subr_ptr, std::string name, std::vector<ExprId> operands,
                      SignalWidth width, bool sign);
