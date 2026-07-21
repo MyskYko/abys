@@ -614,8 +614,8 @@ void lower_lhs_assignment(
     if (width != rhs_width) {
       const BitIndex left = remaining - 1;
       const BitIndex right = remaining - width;
-      expr_id = expr_builder.create_simple_range(
-          rhs_id, left, right, static_cast<BitIndex>(rhs_width - 1), 0);
+      expr_id = expr_builder.create_simple_range(rhs_id, left, right,
+                                                 static_cast<BitIndex>(rhs_width - 1), 0);
     }
     remaining -= width;
     return expr_id;
