@@ -25,7 +25,7 @@ orig_v="$(realpath "$orig_v")"
 
 yosys_bin="${YOSYS:-yosys}"
 
-tmp_dir="$(mktemp -d /tmp/abys-cec.XXXXXX)"
+tmp_dir="$(mktemp -d /tmp/abys-cec-slang.XXXXXX)"
 lowered_v="$tmp_dir/lowered.v"
 equiv_ys="$tmp_dir/equiv.ys"
 gold_v="$tmp_dir/gold.v"
@@ -33,6 +33,7 @@ gate_v="$tmp_dir/gate.v"
 equiv_v="$tmp_dir/equiv.v"
 emit_log="$tmp_dir/abys_emit.log"
 equiv_log="$tmp_dir/yosys_equiv.log"
+orig_yosys_v="$tmp_dir/original_no_stop.v"
 
 normalize_passes="$(cat <<'EOF'
 proc
@@ -46,22 +47,24 @@ delete t:$print
 EOF
 )"
 
+sed 's/\$stop[[:space:]]*;//g' "$orig_v" >"$orig_yosys_v"
+
 if [[ -n "$top" ]]; then
-  hierarchy_cmd="hierarchy -check -top $top"
+  read_orig_cmd="read_slang --ignore-timing --ignore-assertions --top $top $orig_yosys_v"
+  read_gate_cmd="read_slang --ignore-timing --ignore-assertions --top $top $lowered_v"
 else
-  hierarchy_cmd="hierarchy -auto-top"
+  read_orig_cmd="read_slang --ignore-timing --ignore-assertions $orig_yosys_v"
+  read_gate_cmd="read_slang --ignore-timing --ignore-assertions $lowered_v"
 fi
 
 cat >"$equiv_ys" <<EOF
-read_verilog -sv "$orig_v"
-$hierarchy_cmd
+$read_orig_cmd
 $normalize_passes
 rename -top gold
 design -stash gold
 design -reset
 
-read_verilog -sv "$lowered_v"
-$hierarchy_cmd
+$read_gate_cmd
 $normalize_passes
 rename -top gate
 design -stash gate
@@ -91,9 +94,9 @@ if ! "$abys_bin" emit "$orig_v" >"$lowered_v" 2>"$emit_log"; then
   exit 1
 fi
 
-if ! "$yosys_bin" -q "$equiv_ys" >"$equiv_log" 2>&1; then
-  echo "fail: Yosys equivalence failed; log: $equiv_log" >&2
+if ! "$yosys_bin" -m slang -q "$equiv_ys" >"$equiv_log" 2>&1; then
+  echo "fail: Yosys/slang equivalence failed; log: $equiv_log" >&2
   exit 1
 fi
 
-echo "ok: Yosys equivalence passed"
+echo "ok: Yosys/slang equivalence passed"
