@@ -627,8 +627,12 @@ void lower_lhs_assignment(
     bool sign;
     get_width_sign(*lhs.type, width, sign);
     const SignalWidth slice_width = expr_builder.get_width(expr_id);
-    const auto base_value = expr_builder.try_evaluate(base_id);
-    if (slice_width != width || !base_value || *base_value != 0) {
+    bool is_full_width = false;
+    if (slice_width == width) {
+      const auto base_value = expr_builder.try_evaluate(base_id);
+      is_full_width = base_value && *base_value == 0;
+    }
+    if (!is_full_width) {
       const ExprId fallback_id = get_fallback(width, sign);
       return expr_builder.create_masked_assign(fallback_id, expr_id, base_id, slice_width, width,
                                                sign);
