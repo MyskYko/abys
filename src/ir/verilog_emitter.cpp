@@ -669,17 +669,25 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     return name;
   }
   case ExprGraph::Op::kRange: {
-    const std::string data =
-        emit_expr_packed(expr_graph, node.operands[0], names, decl_os, os, indent, assumptions);
-    const std::string base =
-        emit_expr_packed(expr_graph, node.operands[1], names, decl_os, os, indent, assumptions);
+    const ExprId data_id = node.operands[0];
+    const ExprId base_id = node.operands[1];
     const std::string name = temp_name();
     declare_temp(node, name);
-    os << indent << name << " = " << data << "[" << base;
-    if (node.width > 1) {
-      os << " +: " << node.width;
+    const std::string data =
+        emit_expr_packed(expr_graph, data_id, names, decl_os, os, indent, assumptions);
+    const std::string base =
+        emit_expr_packed(expr_graph, base_id, names, decl_os, os, indent, assumptions);
+    if (!kUseShiftMaskForExpressionSelects || can_emit_direct_range_base(expr_graph, data_id)) {
+      os << indent << name << " = " << data << "[" << base;
+      if (node.width > 1) {
+        os << " +: " << node.width;
+      }
+      os << "]";
+    } else {
+      os << indent << name << " = ((" << data << " >> (" << base << ")) & {" << node.width
+         << "{1'b1}})";
     }
-    os << "];\n";
+    os << ";\n";
     names[id] = name;
     return name;
   }
