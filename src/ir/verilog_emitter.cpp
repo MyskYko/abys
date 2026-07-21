@@ -694,6 +694,13 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     names[id] = name;
     return name;
   }
+  case ExprGraph::Op::kUnpackedRange: {
+    const std::string data =
+        emit_expr_packed(expr_graph, node.operands[0], names, decl_os, os, indent, assumptions);
+    const std::string base =
+        emit_expr_packed(expr_graph, node.operands[1], names, decl_os, os, indent, assumptions);
+    return data + "[" + base + " +: " + std::to_string(node.width) + "]";
+  }
   case ExprGraph::Op::kReverse: {
     const ExprId operand_id = node.operands[0];
     const auto &operand_node = expr_graph.nodes[operand_id];
@@ -1083,6 +1090,12 @@ void VerilogEmitter::emit_expr_inline(
     os << "[";
     emit_expr_inline(expr_graph, node.operands[1], lhs, os, assumptions);
     os << "]";
+    return;
+  case ExprGraph::Op::kUnpackedRange:
+    emit_expr_inline(expr_graph, node.operands[0], lhs, os, assumptions);
+    os << "[";
+    emit_expr_inline(expr_graph, node.operands[1], lhs, os, assumptions);
+    os << " +: " << node.width << "]";
     return;
   case ExprGraph::Op::kGather: {
     os << "'{";

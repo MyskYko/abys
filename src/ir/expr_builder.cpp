@@ -493,6 +493,17 @@ ExprId ExprBuilder::create_range(ExprId data, ExprId base, SignalWidth width, bo
   return id;
 }
 
+ExprId ExprBuilder::create_unpacked_range(ExprId data, ExprId base, SignalWidth width) {
+  assert(width > 0);
+  const ExprId id = create_node();
+  auto &node = get_node(id);
+  node.op = ExprGraph::Op::kUnpackedRange;
+  node.width = width;
+  node.sign = false;
+  node.operands = {data, base};
+  return id;
+}
+
 ExprId ExprBuilder::create_gather(std::vector<ExprId> operands) {
   assert(!operands.empty());
   const ExprId id = create_node();
@@ -879,6 +890,7 @@ std::optional<int> ExprBuilder::try_evaluate(ExprId id) const {
   case ExprGraph::Op::kMaskedAssign:
   case ExprGraph::Op::kReverse:
   case ExprGraph::Op::kRange:
+  case ExprGraph::Op::kUnpackedRange:
   case ExprGraph::Op::kUnpackedSelect:
   case ExprGraph::Op::kBothEdge:
   case ExprGraph::Op::kCall:
@@ -1012,6 +1024,7 @@ int ExprBuilder::evaluate(ExprId id) const {
   case ExprGraph::Op::kMaskedAssign:
   case ExprGraph::Op::kReverse:
   case ExprGraph::Op::kRange:
+  case ExprGraph::Op::kUnpackedRange:
   case ExprGraph::Op::kUnpackedSelect:
   case ExprGraph::Op::kBothEdge:
   case ExprGraph::Op::kCall:

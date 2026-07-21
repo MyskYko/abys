@@ -312,17 +312,55 @@ public:
     const auto kind = expr.getSelectionKind();
     const auto &left = expr.left();
     const auto &right = expr.right();
-    slang::ConstantRange range;
     if (type.isUnpackedArray()) {
       const auto &ct = type.getCanonicalType();
       if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
         throw std::logic_error("Unsupported dynamic size unpacked array");
       }
       const auto &arr = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
-      range = arr.range;
-    } else {
-      range = type.getFixedRange();
+      const slang::ConstantRange range = arr.range;
+      ExprId base;
+      SignalWidth width;
+      if (kind == slang::ast::RangeSelectionKind::Simple) {
+        const BitIndex left_pos =
+            builder_.normalize_index(extract_constant_index(left), range.left, range.right);
+        const BitIndex right_pos =
+            builder_.normalize_index(extract_constant_index(right), range.left, range.right);
+        assert(left_pos >= right_pos);
+        base = builder_.find_or_create_const(right_pos);
+        width = static_cast<SignalWidth>(left_pos - right_pos + 1);
+      } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
+                 kind == slang::ast::RangeSelectionKind::IndexedDown) {
+        width = extract_constant_index(right);
+        assert(width > 0);
+        left.visit(*this);
+        const ExprId index = expr_stack_.back();
+        expr_stack_.pop_back();
+        ExprId low = index;
+        if (width > 1) {
+          const ExprId offset = builder_.find_or_create_const(width - 1);
+          if (kind == slang::ast::RangeSelectionKind::IndexedUp && range.left < range.right) {
+            low = builder_.create_add(index, offset);
+          } else if (kind == slang::ast::RangeSelectionKind::IndexedDown &&
+                     range.left >= range.right) {
+            low = builder_.create_sub(index, offset);
+          }
+        }
+        base = builder_.normalize_index_expr(low, range.left, range.right);
+      } else {
+        throw std::logic_error("Unsupported range selection kind");
+      }
+      if (width == builder_.get_width(data)) {
+        const auto base_value = builder_.try_evaluate(base);
+        if (base_value && *base_value == 0) {
+          expr_stack_.push_back(data);
+          return;
+        }
+      }
+      expr_stack_.push_back(builder_.create_unpacked_range(data, base, width));
+      return;
     }
+    const slang::ConstantRange range = type.getFixedRange();
     if (kind == slang::ast::RangeSelectionKind::Simple) {
       const BitIndex left_sw = extract_constant_index(left);
       const BitIndex right_sw = extract_constant_index(right);
