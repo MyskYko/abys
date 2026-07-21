@@ -286,8 +286,20 @@ public:
       expr_stack_.push_back(id);
     } else {
       const auto range = type.getFixedRange();
-      const ExprId id = builder_.create_select(data, index, range.left, range.right);
-      expr_stack_.push_back(id);
+      const SignalWidth width = expr_width(expr);
+      const SignalWidth data_width = expr_width(expr.value());
+      if (data_width == width) {
+        expr_stack_.push_back(data);
+      } else if (width == 1) {
+        const ExprId id = builder_.create_select(data, index, range.left, range.right);
+        expr_stack_.push_back(id);
+      } else {
+        ExprId base = builder_.normalize_index_expr(index, range.left, range.right);
+        const ExprId width_id = builder_.find_or_create_const(
+            std::to_string(data_width) + "'d" + std::to_string(width), data_width, false);
+        base = builder_.create_mul(base, width_id);
+        expr_stack_.push_back(builder_.create_range(data, base, width, expr_sign(expr)));
+      }
     }
   }
 
@@ -313,8 +325,17 @@ public:
     if (kind == slang::ast::RangeSelectionKind::Simple) {
       const BitIndex left_sw = extract_constant_index(left);
       const BitIndex right_sw = extract_constant_index(right);
-      expr_stack_.push_back(
-          builder_.create_simple_range(data, left_sw, right_sw, range.left, range.right));
+      const BitIndex left_pos = builder_.normalize_index(left_sw, range.left, range.right);
+      const BitIndex right_pos = builder_.normalize_index(right_sw, range.left, range.right);
+      const SignalWidth data_width = builder_.get_width(data);
+      const bool is_full_width =
+          right_pos == 0 && left_pos == static_cast<BitIndex>(data_width - 1);
+      if (is_full_width) {
+        expr_stack_.push_back(data);
+      } else {
+        expr_stack_.push_back(
+            builder_.create_simple_range(data, left_sw, right_sw, range.left, range.right));
+      }
     } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
                kind == slang::ast::RangeSelectionKind::IndexedDown) {
       const BitIndex width = extract_constant_index(right);
