@@ -696,10 +696,13 @@ void lower_lhs_assignment(
         SignalWidth selected_width;
         bool selected_sign;
         get_width_sign(*lhs.type, selected_width, selected_sign);
+        const SignalWidth data_width = expr_width(sel.value());
         ExprId offset_id = expr_builder.normalize_index_expr(index_id, range.left, range.right);
         if (selected_width != 1) {
-          offset_id =
-              expr_builder.create_mul(offset_id, expr_builder.find_or_create_const(selected_width));
+          const ExprId selected_width_id = expr_builder.find_or_create_const(
+              std::to_string(data_width) + "'d" + std::to_string(selected_width), data_width,
+              false);
+          offset_id = expr_builder.create_mul(offset_id, selected_width_id);
         }
         updated_base_id = expr_builder.create_add(updated_base_id, offset_id);
       }
@@ -746,13 +749,22 @@ void lower_lhs_assignment(
                                                     expr_builder.find_or_create_const(right_pos));
         } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
                    kind == slang::ast::RangeSelectionKind::IndexedDown) {
-          const SignalWidth width = extract_constant_index(sel.right());
+          const BitIndex width_index = extract_constant_index(sel.right());
+          assert(width_index > 0);
+          const SignalWidth width = static_cast<SignalWidth>(width_index);
           ExprId index_id = build_expr(sel.left(), expr_builder, special_symbols);
           assert(expr_builder.get_width(updated_expr_id) == width);
-          if (kind == slang::ast::RangeSelectionKind::IndexedDown) {
-            assert(width > 0);
-            index_id =
-                expr_builder.create_sub(index_id, expr_builder.find_or_create_const(width - 1));
+          if (width > 1) {
+            const ExprId offset_id = expr_builder.find_or_create_const(width - 1);
+            if (kind == slang::ast::RangeSelectionKind::IndexedUp) {
+              if (range.left < range.right) {
+                index_id = expr_builder.create_add(index_id, offset_id);
+              }
+            } else {
+              if (range.left >= range.right) {
+                index_id = expr_builder.create_sub(index_id, offset_id);
+              }
+            }
           }
           index_id = expr_builder.normalize_index_expr(index_id, range.left, range.right);
           updated_base_id = expr_builder.create_add(updated_base_id, index_id);
