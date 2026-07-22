@@ -4,6 +4,7 @@
 #include <ostream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "abys/ir/tig.h"
 
@@ -36,6 +37,10 @@ private:
   void emit_expr(std::string_view lhs, bool is_nonblocking, bool is_merge,
                  const ExprGraph &expr_graph, ExprId id, std::ostream &os, std::string_view indent,
                  const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
+  void emit_exprs(const std::vector<std::string> &lhs_names, bool is_nonblocking, bool is_merge,
+                  const ExprGraph &expr_graph, const std::vector<ExprId> &expr_ids,
+                  std::ostream &os, std::string_view indent,
+                  const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
   void emit_expr_unpacked(std::string lhs, bool is_nonblocking, bool is_merge,
                           const ExprGraph &expr_graph, ExprId id,
                           std::map<ExprId, std::string> &names, std::ostream &decl_os,

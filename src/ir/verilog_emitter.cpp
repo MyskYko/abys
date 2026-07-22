@@ -168,24 +168,19 @@ void VerilogEmitter::emit_combinational(const Module &module, std::ostream &os) 
   for (const auto &node : module.nodes) {
     if (node.kind == Module::NodeKind::kOp) {
       assert(node.outputs.size() == node.expr_roots.size());
-      bool fEmpty = true;
+      std::vector<std::string> lhs_names;
+      std::vector<ExprId> expr_ids;
       for (size_t i = 0; i < node.outputs.size(); ++i) {
         if (!node.outputs[i].name.empty()) {
-          fEmpty = false;
-          break;
+          lhs_names.push_back(node.outputs[i].name);
+          expr_ids.push_back(node.expr_roots[i]);
         }
       }
-      if (fEmpty) {
+      if (lhs_names.empty()) {
         continue;
       }
-      os << "  always @(*) begin\n";
-      for (size_t i = 0; i < node.outputs.size(); ++i) {
-        if (!node.outputs[i].name.empty()) { // skip convert (already handled above)
-          emit_expr(node.outputs[i].name, false, false, node.expr_graph, node.expr_roots[i], os,
-                    "    ");
-        }
-      }
-      os << "  end\n";
+      os << "  always @(*) ";
+      emit_exprs(lhs_names, false, false, node.expr_graph, expr_ids, os, "  ");
     } else if (node.kind == Module::NodeKind::kMerge) {
       assert(node.outputs.size() == 1);
       std::string name = node.outputs[0].name;
@@ -348,6 +343,33 @@ void VerilogEmitter::emit_expr(std::string_view lhs, bool is_nonblocking, bool i
   const std::string inner_indent = std::string(indent) + "  ";
   emit_expr_unpacked(lhs_name, is_nonblocking, is_merge, expr_graph, id, names, decl_os, stmt_os,
                      assign_os, inner_indent, assumptions);
+  const std::string decls = decl_os.str();
+  const std::string stmts = stmt_os.str();
+  const std::string assigns = assign_os.str();
+  if (!decls.empty() || !stmts.empty() || !assigns.empty()) {
+    os << indent << "begin\n";
+    os << decls;
+    os << stmts;
+    os << assigns;
+    os << indent << "end\n";
+  }
+}
+
+void VerilogEmitter::emit_exprs(const std::vector<std::string> &lhs_names, bool is_nonblocking,
+                                bool is_merge, const ExprGraph &expr_graph,
+                                const std::vector<ExprId> &expr_ids, std::ostream &os,
+                                std::string_view indent,
+                                const std::unordered_map<std::string, bool> *assumptions) const {
+  assert(lhs_names.size() == expr_ids.size());
+  std::map<ExprId, std::string> names;
+  std::ostringstream decl_os;
+  std::ostringstream stmt_os;
+  std::ostringstream assign_os;
+  const std::string inner_indent = std::string(indent) + "  ";
+  for (size_t i = 0; i < lhs_names.size(); ++i) {
+    emit_expr_unpacked(lhs_names[i], is_nonblocking, is_merge, expr_graph, expr_ids[i], names,
+                       decl_os, stmt_os, assign_os, inner_indent, assumptions);
+  }
   const std::string decls = decl_os.str();
   const std::string stmts = stmt_os.str();
   const std::string assigns = assign_os.str();
