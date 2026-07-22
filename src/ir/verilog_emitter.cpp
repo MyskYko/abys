@@ -393,6 +393,36 @@ void VerilogEmitter::emit_expr_unpacked(
                        os, assign_os, indent, assumptions);
     break;
   }
+  case ExprGraph::Op::kMaskedAssign: {
+    bool use_partial_assignment = false;
+    if (kUsePartialAssignmentForMaskedAssign) {
+      const ExprId current = node.operands[0];
+      const auto input = expr_graph.inputs.find(lhs);
+      use_partial_assignment = input != expr_graph.inputs.end() && input->second == current;
+    }
+    if (!use_partial_assignment) {
+      const std::string rhs =
+          emit_expr_packed(expr_graph, id, names, decl_os, os, indent, assumptions);
+      assign_os << indent << lhs << ((is_nonblocking && !is_merge) ? " <= " : " = ") << rhs
+                << ";\n";
+      break;
+    }
+    const ExprId next = node.operands[1];
+    const ExprId base = node.operands[2];
+    const ExprId slice_width = node.operands[3];
+    std::ostringstream selected_lhs;
+    selected_lhs << lhs << "["
+                 << emit_expr_packed(expr_graph, base, names, decl_os, os, indent, assumptions);
+    if (slice_width != expr_graph.constant_one) {
+      selected_lhs << " +: "
+                   << emit_expr_packed(expr_graph, slice_width, names, decl_os, os, indent,
+                                       assumptions);
+    }
+    selected_lhs << "]";
+    emit_expr_unpacked(selected_lhs.str(), is_nonblocking, false, expr_graph, next, names, decl_os,
+                       os, assign_os, indent, assumptions);
+    break;
+  }
   case ExprGraph::Op::kMux: {
     bool assumed = false;
     if (lookup_assumed_condition(expr_graph, node.operands[0], assumptions, assumed)) {
@@ -473,6 +503,12 @@ void VerilogEmitter::emit_expr_unpacked(
     break;
   }
   default: {
+    if (kUsePartialAssignmentForMaskedAssign && node.op == ExprGraph::Op::kInput) {
+      const auto input = expr_graph.inputs.find(lhs);
+      if (input != expr_graph.inputs.end() && input->second == id) {
+        break;
+      }
+    }
     const std::string rhs =
         emit_expr_packed(expr_graph, id, names, decl_os, os, indent, assumptions);
     if (!rhs.empty()) {

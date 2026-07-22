@@ -20,6 +20,7 @@ public:
 private:
   // use shift/mask selects for non-direct expression bases for yosys compatibility
   static constexpr bool kUseShiftMaskForExpressionSelects = true;
+  static constexpr bool kUsePartialAssignmentForMaskedAssign = true;
 
   const Tig &design_;
 
