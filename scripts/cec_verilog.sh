@@ -47,14 +47,16 @@ delete t:$print
 EOF
 )"
 
-sed 's/\$stop[[:space:]]*;//g' "$orig_v" >"$orig_yosys_v"
+sed -E -e 's/\$(stop|finish)[[:space:]]*(\([^;]*\))?[[:space:]]*;/begin end/g' \
+  -e '/\$readmemh[[:space:]]*[(]/s|^|// |' \
+  "$orig_v" >"$orig_yosys_v"
 
 if [[ -n "$top" ]]; then
-  read_orig_cmd="read_slang --ignore-timing --ignore-assertions --top $top $orig_yosys_v"
-  read_gate_cmd="read_slang --ignore-timing --ignore-assertions --top $top $lowered_v"
+  read_orig_cmd="read_slang --ignore-timing --ignore-assertions --ignore-initial --top $top $orig_yosys_v"
+  read_gate_cmd="read_slang --ignore-timing --ignore-assertions --ignore-initial --top $top $lowered_v"
 else
-  read_orig_cmd="read_slang --ignore-timing --ignore-assertions $orig_yosys_v"
-  read_gate_cmd="read_slang --ignore-timing --ignore-assertions $lowered_v"
+  read_orig_cmd="read_slang --ignore-timing --ignore-assertions --ignore-initial $orig_yosys_v"
+  read_gate_cmd="read_slang --ignore-timing --ignore-assertions --ignore-initial $lowered_v"
 fi
 
 cat >"$equiv_ys" <<EOF
