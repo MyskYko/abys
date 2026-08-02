@@ -12,7 +12,9 @@
 
 namespace abys::ir {
 
-TigBuilder::TigBuilder(Tig &design) : design_(design) {}
+TigBuilder::TigBuilder(Tig &design)
+    : design_(design), signal_maps_(design.modules.size()), pending_ffs_(design.modules.size()),
+      input_specs_(design.modules.size()) {}
 
 void TigBuilder::set_top_module(std::string name) {
   design_.top_module_name = std::move(name);
@@ -37,8 +39,7 @@ TigBuilder::NodeId TigBuilder::create_node(ModuleId module_id, NodeKind kind) {
 }
 
 void TigBuilder::add_signal(ModuleId module_id, std::string name, Signal signal) {
-  Module &module = design_.modules[module_id];
-  auto [it, inserted] = module.signal_map.emplace(std::move(name), signal);
+  auto [it, inserted] = signal_maps_[module_id].emplace(std::move(name), signal);
   assert(inserted);
   (void)it;
 }
@@ -63,6 +64,9 @@ TigBuilder::ModuleId TigBuilder::create_module(std::string name) {
   ModuleId module_id = static_cast<ModuleId>(design_.modules.size());
   design_.modules.emplace_back();
   design_.modules.back().name = std::move(name);
+  signal_maps_.emplace_back();
+  pending_ffs_.emplace_back();
+  input_specs_.emplace_back();
   return module_id;
 }
 
@@ -149,9 +153,8 @@ void TigBuilder::record_ff(ModuleId module_id, std::string name, SignalSpec clk_
                            EdgeKind clk_edge, SignalSpec rst_spec, EdgeKind rst_edge,
                            NodeId node_id, PortIndex port_idx) {
   assert(!clk_spec.name.empty());
-  design_.modules[module_id].pending_ffs.emplace_back(
-      Tig::Module::PendingFf{std::move(name), std::move(clk_spec), clk_edge, std::move(rst_spec),
-                             rst_edge, node_id, port_idx});
+  pending_ffs_[module_id].emplace_back(PendingFf{std::move(name), std::move(clk_spec), clk_edge,
+                                                 std::move(rst_spec), rst_edge, node_id, port_idx});
 }
 
 void TigBuilder::add_node_input(ModuleId module_id, NodeId node_id, NodeId input_id,
@@ -195,8 +198,9 @@ PortIndex TigBuilder::add_node_output(ModuleId module_id, NodeId node_id, std::s
   const PortIndex port_idx = static_cast<PortIndex>(module.nodes[node_id].outputs.size());
   std::string final_name;
   if (!name.empty()) {
-    auto it = module.signal_map.find(name);
-    if (it != module.signal_map.end()) {
+    auto &signal_map = signal_maps_[module_id];
+    auto it = signal_map.find(name);
+    if (it != signal_map.end()) {
       assert(get_signal_spec(module_id, it->second).width == width);
       assert(get_signal_spec(module_id, it->second).sign == sign);
       assert(it->second.node_id != kInvalidNodeId);
@@ -244,7 +248,7 @@ ExprGraph &TigBuilder::get_expr_graph(ModuleId module_id, NodeId node_id) {
 
 void TigBuilder::insert_ffs(ModuleId module_id) {
   // TODO: check of multiple driver (e.g., overlapping)
-  auto same_ff_props = [](const Tig::Module::PendingFf &a, const Tig::Module::PendingFf &b) {
+  auto same_ff_props = [](const PendingFf &a, const PendingFf &b) {
     if (a.clk_spec.name != b.clk_spec.name || a.clk_spec.width != b.clk_spec.width ||
         a.clk_spec.sign != b.clk_spec.sign || a.clk_edge != b.clk_edge) {
       return false;
@@ -285,12 +289,13 @@ void TigBuilder::insert_ffs(ModuleId module_id) {
     return Signal{ff_id, 0};
   };
 
-  auto &pending_ffs = module.pending_ffs;
+  auto &pending_ffs = pending_ffs_[module_id];
+  auto &signal_map = signal_maps_[module_id];
   std::sort(pending_ffs.begin(), pending_ffs.end(),
             [](const PendingFf &a, const PendingFf &b) { return a.name < b.name; });
   for (size_t begin = 0; begin < pending_ffs.size();) {
-    auto it = module.signal_map.find(pending_ffs[begin].name);
-    if (it == module.signal_map.end()) {
+    auto it = signal_map.find(pending_ffs[begin].name);
+    if (it == signal_map.end()) {
       throw std::logic_error("insert_ffs: signal not found: " + pending_ffs[begin].name);
     }
     const auto spec = get_signal_spec(module_id, it->second);
@@ -354,7 +359,7 @@ void TigBuilder::insert_ffs(ModuleId module_id) {
     }
     begin = end;
   }
-  module.pending_ffs.clear();
+  pending_ffs.clear();
 }
 
 void TigBuilder::wire_connections(ModuleId module_id) {
@@ -364,8 +369,9 @@ void TigBuilder::wire_connections(ModuleId module_id) {
     for (size_t i = 0; i < specs.size(); ++i) {
       const std::string &name = specs[i].name;
       if (!name.empty()) {
-        const auto it = module.signal_map.find(name);
-        if (it == module.signal_map.end()) {
+        const auto &signal_map = signal_maps_[module_id];
+        const auto it = signal_map.find(name);
+        if (it == signal_map.end()) {
           std::cerr << "warning: leaving unresolved signal input unconnected: " << module.name
                     << "." << name << "\n"; // TODO: decide warning system
           continue;

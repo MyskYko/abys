@@ -7,7 +7,7 @@
 namespace abys::ir {
 
 using PortIndex = uint32_t;
-using SignalWidth = uint64_t; // TODO: seems like 32 bit is slang max
+using SignalWidth = uint64_t; // TODO: add a build-time option to use 32-bit widths for performance.
 using BitIndex = int64_t;
 using ExprId = uint32_t;
 

@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "abys/ir/tig.h"
@@ -30,9 +31,20 @@ public:
   using EdgeRef = Tig::Module::EdgeRef;
   using Signal = EdgeRef;
   using SignalSpec = Tig::Module::Node::Output;
-  using PendingFf = Tig::Module::PendingFf;
 
 private:
+  struct PendingFf {
+    std::string name;
+    SignalSpec clk_spec;
+    EdgeKind clk_edge = EdgeKind::kNone;
+    SignalSpec rst_spec;
+    EdgeKind rst_edge = EdgeKind::kNone;
+    NodeId node_id = kInvalidNodeId;
+    PortIndex port_idx = 0;
+  };
+
+  std::vector<std::unordered_map<std::string, Signal>> signal_maps_;
+  std::vector<std::vector<PendingFf>> pending_ffs_;
   std::vector<std::vector<std::vector<SignalSpec>>> input_specs_;
 
   NodeId create_node(ModuleId module_id, NodeKind kind);

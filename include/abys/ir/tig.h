@@ -8,8 +8,6 @@
 #include "abys/ir/expr.h"
 #include "abys/ir/type.h"
 
-// TODO: unordered_map should always be reserved somehow
-
 namespace abys::ir {
 
 struct Tig {
@@ -81,24 +79,12 @@ struct Tig {
       bool sign = false;
     };
 
-    struct PendingFf {
-      std::string name;
-      Node::Output clk_spec;
-      EdgeKind clk_edge = EdgeKind::kNone;
-      Node::Output rst_spec;
-      EdgeKind rst_edge = EdgeKind::kNone;
-      NodeId node_id = kInvalidNodeId;
-      PortIndex port_idx = 0;
-    };
-
     std::string name;
     std::vector<Port> input_ports;
     std::vector<Port> output_ports;
     std::vector<Node> nodes;
     std::vector<Variable> variables;
     std::vector<UnpackedVariable> unpacked_variables;
-    std::unordered_map<std::string, EdgeRef> signal_map; // TODO: move to builder?
-    std::vector<PendingFf> pending_ffs;                  // TODO: move to builder?
   };
 
   struct Subroutine {
