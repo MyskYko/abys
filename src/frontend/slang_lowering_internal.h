@@ -39,6 +39,13 @@ namespace abys::frontend {
 
 using namespace abys::ir;
 
+struct SlangLoweringContext {
+  std::unordered_map<const slang::ast::Symbol *, std::string> special_symbols;
+  std::unordered_map<const slang::ast::SubroutineSymbol *, SubroutineId> subroutine_ids;
+
+  SubroutineId get_or_create_subroutine_id(const slang::ast::SubroutineSymbol &symbol);
+};
+
 const char *definition_kind_to_string(slang::ast::DefinitionKind kind);
 SignalWidth expr_width(const slang::ast::Expression &expr);
 bool expr_sign(const slang::ast::Expression &expr);
@@ -57,18 +64,18 @@ BitIndex extract_constant_index(const slang::ast::Expression &expr);
 void get_width_sign(const slang::ast::Type &type, SignalWidth &width, bool &sign);
 
 ExprId build_expr(const slang::ast::Expression &expr, ExprBuilder &expr_builder,
-                  std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols);
+                  SlangLoweringContext &context);
 
 void lower_statement(const slang::ast::Statement &statement, StmtBuilder &builder,
-                     std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols,
-                     const PragmaMap &pragmas);
+                     SlangLoweringContext &context, const PragmaMap &pragmas);
 
 template <typename EmitFn>
-void lower_lhs_assignment(
-    const slang::ast::Expression &whole_lhs, ExprId rhs_id, SignalWidth rhs_width,
-    ExprBuilder &expr_builder,
-    std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols,
-    const std::unordered_map<std::string, ExprId> *scheduled_assignments, EmitFn &&record) {
+void lower_lhs_assignment(const slang::ast::Expression &whole_lhs, ExprId rhs_id,
+                          SignalWidth rhs_width, ExprBuilder &expr_builder,
+                          SlangLoweringContext &context,
+                          const std::unordered_map<std::string, ExprId> *scheduled_assignments,
+                          EmitFn &&record) {
+  auto &special_symbols = context.special_symbols;
   assert(rhs_width > 0);
   assert(rhs_width <= static_cast<SignalWidth>(std::numeric_limits<BitIndex>::max()));
   SignalWidth remaining = rhs_width;
@@ -158,7 +165,7 @@ void lower_lhs_assignment(
     }
     if (lhs.kind == slang::ast::ExpressionKind::ElementSelect) {
       const auto &sel = lhs.as<slang::ast::ElementSelectExpression>();
-      const ExprId index_id = build_expr(sel.selector(), expr_builder, special_symbols);
+      const ExprId index_id = build_expr(sel.selector(), expr_builder, context);
       const slang::ConstantRange range = get_range(*sel.value().type);
       ExprId updated_expr_id = expr_id;
       ExprId updated_base_id = base_id;
@@ -166,7 +173,7 @@ void lower_lhs_assignment(
         if (!lhs.type->isUnpackedArray()) {
           updated_expr_id =
               finalize_packed_update(lhs, updated_expr_id, updated_base_id, [&](SignalWidth, bool) {
-                return build_expr(lhs, expr_builder, special_symbols);
+                return build_expr(lhs, expr_builder, context);
               });
           updated_base_id = expr_builder.get_constant_zero();
         }
@@ -208,7 +215,7 @@ void lower_lhs_assignment(
         } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
                    kind == slang::ast::RangeSelectionKind::IndexedDown) {
           const SignalWidth slice_width = extract_constant_index(sel.right());
-          const ExprId base = build_expr(sel.left(), expr_builder, special_symbols);
+          const ExprId base = build_expr(sel.left(), expr_builder, context);
           const bool dir = kind == slang::ast::RangeSelectionKind::IndexedUp;
           updated_expr_id = expr_builder.unpacked_assign_part_select(
               expr_id, base, slice_width, dir, range.left, range.right, width, sign);
@@ -235,7 +242,7 @@ void lower_lhs_assignment(
           const BitIndex width_index = extract_constant_index(sel.right());
           assert(width_index > 0);
           const SignalWidth width = static_cast<SignalWidth>(width_index);
-          ExprId index_id = build_expr(sel.left(), expr_builder, special_symbols);
+          ExprId index_id = build_expr(sel.left(), expr_builder, context);
           assert(expr_builder.get_width(updated_expr_id) == width);
           if (width > 1) {
             const ExprId offset_id =

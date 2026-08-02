@@ -610,16 +610,15 @@ ExprId ExprBuilder::unpacked_assign_part_select(ExprId next, ExprId base, Signal
   return create_unpacked_assign(next, base_id, width_id, width, sign);
 }
 
-ExprId ExprBuilder::create_call(const void *subr_ptr, std::string name,
+ExprId ExprBuilder::create_call(SubroutineId subroutine_id, std::string name,
                                 std::vector<ExprId> operands, SignalWidth width, bool sign) {
-  // TODO: find_or_create?
   const ExprId id = create_node();
   auto &node = get_node(id);
   node.op = ExprGraph::Op::kCall;
   node.width = width;
   node.sign = sign;
   node.operands = std::move(operands);
-  graph_.calls.emplace_back(ExprGraph::Call{id, subr_ptr, std::move(name)});
+  graph_.calls.emplace_back(ExprGraph::Call{id, subroutine_id, std::move(name)});
   return id;
 }
 
@@ -988,11 +987,11 @@ int ExprBuilder::evaluate(ExprId id) const {
     return evaluate(node.operands[0]) - evaluate(node.operands[1]);
   case ExprGraph::Op::kMul:
     return evaluate(node.operands[0]) * evaluate(node.operands[1]);
-  case ExprGraph::Op::kDiv: // TODO: handle unsynthesizable if not constant
+  case ExprGraph::Op::kDiv:
     return evaluate(node.operands[0]) / evaluate(node.operands[1]);
-  case ExprGraph::Op::kMod: // TODO: handle unsynthesizable if not constant
+  case ExprGraph::Op::kMod:
     return evaluate(node.operands[0]) % evaluate(node.operands[1]);
-  case ExprGraph::Op::kPow: // TODO: handle unsynthesizable if not constant
+  case ExprGraph::Op::kPow:
     return static_cast<int>(std::pow(evaluate(node.operands[0]), evaluate(node.operands[1])));
   case ExprGraph::Op::kShl:
     return evaluate(node.operands[0]) << evaluate(node.operands[1]);

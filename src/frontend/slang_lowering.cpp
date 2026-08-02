@@ -20,7 +20,7 @@ private:
   std::unordered_map<const slang::ast::InstanceBodySymbol *, ModuleId> module_ids_;
 
   std::string suffix_;
-  std::unordered_map<const slang::ast::Symbol *, std::string> special_symbols_;
+  SlangLoweringContext context_;
   // TODO: think about unordered_map size
 
   ModuleId current_module_id() const {
@@ -34,7 +34,7 @@ private:
     const ModuleId module_id = current_module_id();
     const NodeId node_id = builder_.create_operation(module_id);
     ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
-    const ExprId expr_id = build_expr(expr, expr_builder, special_symbols_);
+    const ExprId expr_id = build_expr(expr, expr_builder, context_);
     expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
       builder_.add_node_input_spec(module_id, node_id, name, width, sign);
     });
@@ -66,7 +66,7 @@ private:
           reg = elem.as<slang::ast::IntegralType>().isDeclaredReg();
         }
       }
-      name = register_symbol_name(symbol, special_symbols_, suffix_);
+      name = register_symbol_name(symbol, context_.special_symbols, suffix_);
       builder_.create_unpacked_variable(current_module_id(), name, std::move(dims), width, sign,
                                         net, reg);
     } else {
@@ -78,7 +78,7 @@ private:
           reg = type.as<slang::ast::IntegralType>().isDeclaredReg();
         }
       }
-      name = register_symbol_name(symbol, special_symbols_, suffix_);
+      name = register_symbol_name(symbol, context_.special_symbols, suffix_);
       builder_.create_variable(current_module_id(), name, width, sign, net, reg);
     }
     return name;
@@ -94,7 +94,7 @@ private:
     assert(expr.kind == slang::ast::ExpressionKind::Assignment);
     const auto &assign = expr.as<slang::ast::AssignmentExpression>();
     assert(assign.right().kind == slang::ast::ExpressionKind::EmptyArgument);
-    return extract_named_value(assign.left(), special_symbols_);
+    return extract_named_value(assign.left(), context_.special_symbols);
   }
 
   abys::ir::SignalWidth port_width(const slang::ast::PortSymbol &port) {
@@ -208,7 +208,7 @@ public:
           } else {
             // TODO: handle unpacked
             builder_.add_node_input_spec(module_id, node_id,
-                                         extract_named_value(*expr, special_symbols_),
+                                         extract_named_value(*expr, context_.special_symbols),
                                          expr_width(*expr), expr_sign(*expr));
           }
         } else if (port.direction == slang::ast::ArgumentDirection::Out) {
@@ -246,7 +246,7 @@ public:
             builder_.add_node_input(module_id, output_node_id, node_id, port_idx);
           }
           if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
-            const std::string output_name = extract_named_value(lhs, special_symbols_);
+            const std::string output_name = extract_named_value(lhs, context_.special_symbols);
             if (output_expr_id == kInvalidExprId) {
               builder_.add_node_output(module_id, output_node_id, output_name, rhs_width, rhs_sign);
             } else {
@@ -268,7 +268,7 @@ public:
             ExprBuilder expr_builder(builder_.get_expr_graph(module_id, op_id));
             ExprId rhs_id = expr_builder.find_or_create_input(temporary_name, rhs_width, rhs_sign);
             std::unordered_map<std::string, ExprId> to_store;
-            lower_lhs_assignment(lhs, rhs_id, rhs_width, expr_builder, special_symbols_, nullptr,
+            lower_lhs_assignment(lhs, rhs_id, rhs_width, expr_builder, context_, nullptr,
                                  [&](const std::string &output_name, ExprId expr_id) {
                                    expr_builder.update_value(output_name, expr_id);
                                    to_store[output_name] = expr_id;
@@ -306,11 +306,11 @@ public:
       for (size_t i = 0; i + 1 < ports.size(); ++i) {
         outputs.push_back(ports[i]);
       }
-      inputs.push_back(build_expr(*ports.back(), expr_builder, special_symbols_));
+      inputs.push_back(build_expr(*ports.back(), expr_builder, context_));
     } else {
       outputs.push_back(ports.front());
       for (size_t i = 1; i < ports.size(); ++i) {
-        inputs.push_back(build_expr(*ports[i], expr_builder, special_symbols_));
+        inputs.push_back(build_expr(*ports[i], expr_builder, context_));
       }
     }
     ExprId rhs_id = kInvalidExprId;
@@ -340,8 +340,8 @@ public:
     for (const auto *output : outputs) {
       assert(output->kind == slang::ast::ExpressionKind::Assignment);
       const auto &assign = output->as<slang::ast::AssignmentExpression>();
-      lower_lhs_assignment(assign.left(), rhs_id, rhs_width, expr_builder, special_symbols_,
-                           nullptr, [&](const std::string &output_name, ExprId expr_id) {
+      lower_lhs_assignment(assign.left(), rhs_id, rhs_width, expr_builder, context_, nullptr,
+                           [&](const std::string &output_name, ExprId expr_id) {
                              expr_builder.update_value(output_name, expr_id);
                              to_store[output_name] = expr_id;
                            });
@@ -361,11 +361,11 @@ public:
     const ModuleId module_id = current_module_id();
     const NodeId node_id = builder_.create_operation(module_id);
     ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
-    ExprId rhs_id = build_expr(assign_expr.right(), expr_builder, special_symbols_);
+    ExprId rhs_id = build_expr(assign_expr.right(), expr_builder, context_);
     const SignalWidth rhs_width = expr_builder.get_width(rhs_id);
     std::unordered_map<std::string, ExprId> to_store;
-    lower_lhs_assignment(assign_expr.left(), rhs_id, rhs_width, expr_builder, special_symbols_,
-                         nullptr, [&](const std::string &output_name, ExprId expr_id) {
+    lower_lhs_assignment(assign_expr.left(), rhs_id, rhs_width, expr_builder, context_, nullptr,
+                         [&](const std::string &output_name, ExprId expr_id) {
                            expr_builder.update_value(output_name, expr_id);
                            to_store[output_name] = expr_id;
                          });
@@ -379,7 +379,10 @@ public:
 
   void handle(const slang::ast::RootSymbol &symbol) { this->visitDefault(symbol); }
 
-  void handle(const slang::ast::CompilationUnitSymbol &symbol) { this->visitDefault(symbol); }
+  void handle(const slang::ast::CompilationUnitSymbol &symbol) {
+    // TODO: reject or lower compilation-unit variables before recursively visiting the scope.
+    this->visitDefault(symbol);
+  }
 
   void handle(const slang::ast::VariableSymbol &symbol) { create_variable(symbol, false); }
 
@@ -392,7 +395,7 @@ public:
     const ModuleId module_id = current_module_id();
     const NodeId node_id = builder_.create_operation(module_id);
     ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
-    ExprId rhs_id = build_expr(*init, expr_builder, special_symbols_);
+    ExprId rhs_id = build_expr(*init, expr_builder, context_);
     expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
       builder_.add_node_input_spec(module_id, node_id, name, width, sign);
     });
@@ -425,7 +428,7 @@ public:
       throw std::logic_error("Unknown procedural block kind");
     }
     const slang::ast::Statement &stmt = symbol.getBody();
-    lower_statement(stmt, stmt_builder, special_symbols_, pragmas_);
+    lower_statement(stmt, stmt_builder, context_, pragmas_);
     stmt_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
       builder_.add_node_input_spec(module_id, node_id, name, width, sign);
     });
@@ -462,7 +465,6 @@ public:
     // TODO: it is better to remove dependency on tig structure; use builder api to create a
     // subroutine
     Tig::Subroutine subr;
-    subr.subr_ptr = &symbol;
     subr.name = std::string(symbol.name);
     for (const auto *arg : symbol.getArguments()) {
       // TODO: handle packed/unpacked array
@@ -482,13 +484,13 @@ public:
         std::string(symbol.name), stmt_builder.get_expr_builder().find_or_create_const(
                                       std::to_string(return_width) + "'b" + return_unknown,
                                       return_width, return_type.isSigned()));
-    lower_statement(symbol.getBody(), stmt_builder, special_symbols_, pragmas_);
+    lower_statement(symbol.getBody(), stmt_builder, context_, pragmas_);
     const ExprId ret = stmt_builder.get_expr_builder().get_current_value(symbol.name);
     if (ret == kInvalidExprId) {
       throw std::logic_error("Function has no return assignment: " + std::string(symbol.name));
     }
     subr.expr_root = ret;
-    builder_.add_subroutine(std::move(subr)); // add API
+    builder_.add_subroutine(context_.get_or_create_subroutine_id(symbol), std::move(subr));
   }
 
   void handle(const slang::ast::StatementBlockSymbol &symbol) {

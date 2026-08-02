@@ -25,9 +25,10 @@ struct ExprGraph {
     kAdd,
     kSub,
     kMul,
-    kDiv, // TODO: handle unsynthesizable if not constant
-    kMod, // TODO: handle unsynthesizable if not constant
-    kPow, // TODO: handle unsynthesizable if not constant
+    // TODO: define backend synthesis constraints for nonconstant division, modulo, and power.
+    kDiv,
+    kMod,
+    kPow,
     kShl,
     kShr,
     kAshr,
@@ -60,13 +61,14 @@ struct ExprGraph {
 
   struct Constant {
     ExprId id = kInvalidExprId;
-    std::string value; // TODO: think about better structure
+    // TODO: represent constants structurally while preserving arbitrary-width and four-state
+    // values.
+    std::string value;
   };
 
-  // TODO: probably a better way is to hold map from subr to subr_id in visitor and use subr_id here
   struct Call {
     ExprId id = kInvalidExprId;
-    const void *subr_ptr = nullptr;
+    SubroutineId subroutine_id = kInvalidSubroutineId;
     std::string name; // to debug
   };
 

@@ -2,6 +2,20 @@
 
 namespace abys::frontend {
 
+SubroutineId
+SlangLoweringContext::get_or_create_subroutine_id(const slang::ast::SubroutineSymbol &symbol) {
+  const auto it = subroutine_ids.find(&symbol);
+  if (it != subroutine_ids.end()) {
+    return it->second;
+  }
+  if (subroutine_ids.size() >= kInvalidSubroutineId) {
+    throw std::overflow_error("Too many subroutines");
+  }
+  const SubroutineId id = static_cast<SubroutineId>(subroutine_ids.size());
+  subroutine_ids.emplace(&symbol, id);
+  return id;
+}
+
 const char *definition_kind_to_string(slang::ast::DefinitionKind kind) {
   switch (kind) {
   case slang::ast::DefinitionKind::Module:

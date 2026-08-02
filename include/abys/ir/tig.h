@@ -93,7 +93,6 @@ struct Tig {
       SignalWidth width = 0;
       bool sign = false;
     };
-    const void *subr_ptr = nullptr;
     std::string name; // for debug
     std::vector<Port> inputs;
     ExprGraph expr_graph;

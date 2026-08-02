@@ -6,14 +6,12 @@ class SlangExprLoweringVisitor final
     : public slang::ast::ASTVisitor<SlangExprLoweringVisitor, false, true, false, true> {
 private:
   ExprBuilder &builder_;
-  std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols_;
+  SlangLoweringContext &context_;
   std::vector<ExprId> expr_stack_;
 
 public:
-  explicit SlangExprLoweringVisitor(
-      ExprBuilder &builder,
-      std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols)
-      : builder_(builder), special_symbols_(special_symbols) {}
+  explicit SlangExprLoweringVisitor(ExprBuilder &builder, SlangLoweringContext &context)
+      : builder_(builder), context_(context) {}
 
   template <typename T> void handle(const T &) {
     throw std::logic_error(std::string("Unhandled AST node: ") + typeid(T).name());
@@ -43,8 +41,8 @@ public:
         return;
       }
     }
-    ExprId id = builder_.find_or_create_input(lower_symbol_name(expr.symbol, special_symbols_),
-                                              width, sign);
+    ExprId id = builder_.find_or_create_input(
+        lower_symbol_name(expr.symbol, context_.special_symbols), width, sign);
     expr_stack_.push_back(id);
   }
 
@@ -123,8 +121,9 @@ public:
       expr_stack_.pop_back();
     }
     std::string name(expr.getSubroutineName());
-    const auto *subr_ptr = std::get<const slang::ast::SubroutineSymbol *>(expr.subroutine);
-    const ExprId id = builder_.create_call(subr_ptr, std::move(name), std::move(operands),
+    const auto *subroutine = std::get<const slang::ast::SubroutineSymbol *>(expr.subroutine);
+    const SubroutineId subroutine_id = context_.get_or_create_subroutine_id(*subroutine);
+    const ExprId id = builder_.create_call(subroutine_id, std::move(name), std::move(operands),
                                            expr_width(expr), expr_sign(expr));
     expr_stack_.push_back(id);
   }
@@ -480,8 +479,8 @@ public:
 };
 
 ExprId build_expr(const slang::ast::Expression &expr, ExprBuilder &expr_builder,
-                  std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols) {
-  SlangExprLoweringVisitor expr_visitor(expr_builder, special_symbols);
+                  SlangLoweringContext &context) {
+  SlangExprLoweringVisitor expr_visitor(expr_builder, context);
   expr.visit(expr_visitor);
   return expr_visitor.get_root();
 }

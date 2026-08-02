@@ -89,7 +89,7 @@ public:
   void insert_ffs(ModuleId module_id);
   void wire_connections(ModuleId module_id);
 
-  void add_subroutine(Tig::Subroutine subr);
+  void add_subroutine(SubroutineId id, Tig::Subroutine subr);
   void flatten_calls();
 
   void set_node_input(ModuleId module_id, NodeId node_id, PortIndex port_idx, Signal input);

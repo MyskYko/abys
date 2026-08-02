@@ -394,25 +394,27 @@ void TigBuilder::wire_connections(ModuleId module_id) {
   }
 }
 
-void TigBuilder::add_subroutine(Tig::Subroutine subr) {
-  design_.subroutines.push_back(std::move(subr));
+void TigBuilder::add_subroutine(SubroutineId id, Tig::Subroutine subr) {
+  if (id >= design_.subroutines.size()) {
+    design_.subroutines.resize(static_cast<size_t>(id) + 1);
+  }
+  if (design_.subroutines[id].expr_root != kInvalidExprId) {
+    throw std::logic_error("Duplicate subroutine definition: " + subr.name);
+  }
+  design_.subroutines[id] = std::move(subr);
 }
 
 void TigBuilder::flatten_calls() {
-  std::unordered_map<const void *, size_t> subr_map;
-  subr_map.reserve(design_.subroutines.size());
-  for (size_t i = 0; i < design_.subroutines.size(); ++i) {
-    subr_map.emplace(design_.subroutines[i].subr_ptr, i);
-  }
   for (auto &module : design_.modules) {
     for (auto &node : module.nodes) {
       ExprGraph &expr_graph = node.expr_graph;
       for (size_t i = 0; i < expr_graph.calls.size(); ++i) {
-        auto subr_it = subr_map.find(expr_graph.calls[i].subr_ptr);
-        if (subr_it == subr_map.end()) {
+        const SubroutineId subroutine_id = expr_graph.calls[i].subroutine_id;
+        if (subroutine_id >= design_.subroutines.size() ||
+            design_.subroutines[subroutine_id].expr_root == kInvalidExprId) {
           throw std::logic_error("Unknown subroutine: " + expr_graph.calls[i].name);
         }
-        const Tig::Subroutine &subr = design_.subroutines[subr_it->second];
+        const Tig::Subroutine &subr = design_.subroutines[subroutine_id];
         ExprId call_id = expr_graph.calls[i].id;
         if (expr_graph.nodes[call_id].operands.size() != subr.inputs.size()) {
           throw std::logic_error("Call arity mismatch: " + expr_graph.calls[i].name);
@@ -466,7 +468,7 @@ void TigBuilder::flatten_calls() {
           if (src.op == ExprGraph::Op::kCall) {
             for (const auto &src_call : subr.expr_graph.calls) {
               if (src_call.id == src_id) {
-                expr_graph.calls.push_back({dst_id, src_call.subr_ptr, src_call.name});
+                expr_graph.calls.push_back({dst_id, src_call.subroutine_id, src_call.name});
                 break;
               }
             }

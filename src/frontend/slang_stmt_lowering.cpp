@@ -6,15 +6,13 @@ class SlangStmtLoweringVisitor final
     : public slang::ast::ASTVisitor<SlangStmtLoweringVisitor, true, false, false, true> {
 private:
   StmtBuilder &builder_;
-  std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols_;
+  SlangLoweringContext &context_;
   const PragmaMap &pragmas_;
 
 public:
-  explicit SlangStmtLoweringVisitor(
-      StmtBuilder &builder,
-      std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols,
-      const PragmaMap &pragmas)
-      : builder_(builder), special_symbols_(special_symbols), pragmas_(pragmas) {}
+  explicit SlangStmtLoweringVisitor(StmtBuilder &builder, SlangLoweringContext &context,
+                                    const PragmaMap &pragmas)
+      : builder_(builder), context_(context), pragmas_(pragmas) {}
 
   template <typename T> void handle(const T &) {
     throw std::logic_error(std::string("Unhandled AST node: ") + typeid(T).name());
@@ -27,7 +25,7 @@ public:
     const std::string name(symbol.name);
     builder_.add_local_variable(name);
     if (const auto *init = symbol.getInitializer()) {
-      ExprId expr_id = build_expr(*init, builder_.get_expr_builder(), special_symbols_);
+      ExprId expr_id = build_expr(*init, builder_.get_expr_builder(), context_);
       builder_.get_expr_builder().update_value(name, expr_id);
       builder_.scheduled_assignments()[name] = expr_id;
       builder_.output_names().push_back(name);
@@ -99,12 +97,12 @@ public:
     }
     const auto &assign = stmt.expr.as<slang::ast::AssignmentExpression>();
     assert(!assign.isCompound()); // TODO: we need to handle this later
-    ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), special_symbols_);
+    ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), context_);
     const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
     const bool nonblocking = assign.isNonBlocking();
     std::unordered_map<std::string, ExprId> to_restore;
     lower_lhs_assignment(
-        assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), special_symbols_,
+        assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), context_,
         &builder_.scheduled_assignments(), [&](const std::string &output_name, ExprId expr_id) {
           if (nonblocking && !to_restore.contains(output_name)) {
             to_restore[output_name] = builder_.get_expr_builder().get_current_value(output_name);
@@ -123,7 +121,7 @@ public:
   void handle(const slang::ast::ConditionalStatement &stmt) {
     std::vector<ExprId> cond_ids;
     for (const auto &cond : stmt.conditions) {
-      ExprId cond_id = build_expr(*cond.expr, builder_.get_expr_builder(), special_symbols_);
+      ExprId cond_id = build_expr(*cond.expr, builder_.get_expr_builder(), context_);
       cond_ids.push_back(cond_id);
     }
     assert(!cond_ids.empty());
@@ -154,13 +152,12 @@ public:
 
   void handle(const slang::ast::CaseStatement &stmt) {
     size_t index = builder_.get_context_stack_index();
-    ExprId case_id = build_expr(stmt.expr, builder_.get_expr_builder(), special_symbols_);
+    ExprId case_id = build_expr(stmt.expr, builder_.get_expr_builder(), context_);
     std::vector<ExprId> case_values;
     for (const auto &item : stmt.items) {
       std::vector<ExprId> values;
       for (const auto *value_expression : item.expressions) {
-        values.push_back(
-            build_expr(*value_expression, builder_.get_expr_builder(), special_symbols_));
+        values.push_back(build_expr(*value_expression, builder_.get_expr_builder(), context_));
       }
       ExprId value_id = kInvalidExprId;
       if (values.size() > 1) {
@@ -197,7 +194,7 @@ public:
         const std::string name(var->name);
         builder_.add_local_variable(name);
         if (const auto *init = var->getInitializer()) {
-          ExprId expr_id = build_expr(*init, builder_.get_expr_builder(), special_symbols_);
+          ExprId expr_id = build_expr(*init, builder_.get_expr_builder(), context_);
           builder_.get_expr_builder().update_value(name, expr_id);
           builder_.scheduled_assignments()[name] = expr_id;
           builder_.output_names().push_back(name);
@@ -218,10 +215,10 @@ public:
         throw std::logic_error("compound for-loop initializer is unsupported");
       }
       assert(!assign.isNonBlocking());
-      ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), special_symbols_);
+      ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), context_);
       const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
-      lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(),
-                           special_symbols_, &builder_.scheduled_assignments(),
+      lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), context_,
+                           &builder_.scheduled_assignments(),
                            [&](const std::string &output_name, ExprId expr_id) {
                              builder_.get_expr_builder().update_value(output_name, expr_id);
                              builder_.scheduled_assignments()[output_name] = expr_id;
@@ -236,7 +233,7 @@ public:
         // TODO: handle break/continue
         throw std::logic_error("for-loop without stop condition is unsupported");
       }
-      ExprId stop_id = build_expr(*stmt.stopExpr, builder_.get_expr_builder(), special_symbols_);
+      ExprId stop_id = build_expr(*stmt.stopExpr, builder_.get_expr_builder(), context_);
       if (!builder_.get_expr_builder().evaluate(stop_id)) {
         break;
       }
@@ -253,7 +250,7 @@ public:
           throw std::logic_error("compound is unsupported");
         }
         assert(!assign.isNonBlocking());
-        ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), special_symbols_);
+        ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), context_);
         const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
         const bool rhs_sign = builder_.get_expr_builder().get_sign(rhs_id);
         const int rhs_value =
@@ -262,7 +259,7 @@ public:
         rhs_id = builder_.get_expr_builder().find_or_create_const(
             rhs_sv.toString(slang::LiteralBase::Binary), rhs_width, rhs_sign);
         lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(),
-                             special_symbols_, &builder_.scheduled_assignments(),
+                             context_, &builder_.scheduled_assignments(),
                              [&](const std::string &output_name, ExprId expr_id) {
                                builder_.get_expr_builder().update_value(output_name, expr_id);
                                builder_.scheduled_assignments()[output_name] = expr_id;
@@ -296,11 +293,10 @@ public:
       throw std::logic_error("Nested TimedStatement");
     }
     auto add_event = [&](const slang::ast::SignalEventControl &ev) {
-      const ExprId expr_id = build_expr(ev.expr, builder_.get_expr_builder(), special_symbols_);
+      const ExprId expr_id = build_expr(ev.expr, builder_.get_expr_builder(), context_);
       const ExprId iff_id =
-          ev.iffCondition
-              ? build_expr(*ev.iffCondition, builder_.get_expr_builder(), special_symbols_)
-              : kInvalidExprId;
+          ev.iffCondition ? build_expr(*ev.iffCondition, builder_.get_expr_builder(), context_)
+                          : kInvalidExprId;
       const bool pos =
           ev.edge == slang::ast::EdgeKind::PosEdge || ev.edge == slang::ast::EdgeKind::BothEdges;
       const bool neg =
@@ -339,9 +335,8 @@ public:
 };
 
 void lower_statement(const slang::ast::Statement &statement, StmtBuilder &builder,
-                     std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols,
-                     const PragmaMap &pragmas) {
-  SlangStmtLoweringVisitor visitor(builder, special_symbols, pragmas);
+                     SlangLoweringContext &context, const PragmaMap &pragmas) {
+  SlangStmtLoweringVisitor visitor(builder, context, pragmas);
   statement.visit(visitor);
 }
 
