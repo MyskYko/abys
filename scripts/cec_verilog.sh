@@ -83,7 +83,7 @@ select equiv
 async2sync
 opt
 equiv_simple
-equiv_induct
+equiv_induct -seq 8
 select equiv
 write_verilog -selected "$equiv_v"
 equiv_status -assert equiv
