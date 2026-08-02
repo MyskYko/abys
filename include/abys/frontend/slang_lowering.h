@@ -1372,8 +1372,8 @@ public:
       assert(it != module_ids_.end());
       const ModuleId instance_module_id = it->second;
 
-      const NodeId node_id = builder_.create_instance(
-          module_id, std::string(symbol.name) + suffix_, instance_module_id);
+      const NodeId node_id = builder_.create_instance(module_id, std::string(symbol.name) + suffix_,
+                                                      instance_module_id);
 
       for (const auto *conn : symbol.getPortConnections()) {
         assert(conn);

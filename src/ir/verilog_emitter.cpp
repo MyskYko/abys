@@ -799,7 +799,6 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     }
     const std::string cond =
         emit_expr_packed(expr_graph, node.operands[0], names, decl_os, os, indent, assumptions);
-    const std::string branch_indent = std::string(indent) + "  ";
     const std::string then_name =
         emit_expr_packed(expr_graph, node.operands[1], names, decl_os, os, indent, assumptions);
     const std::string else_name =

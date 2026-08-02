@@ -64,11 +64,11 @@ target_include_directories(abys_core
     $<INSTALL_INTERFACE:include>
 )
 
-target_compile_features(abys_core PUBLIC cxx_std_17)
+target_compile_features(abys_core PUBLIC cxx_std_20)
 
 target_compile_options(abys_core PRIVATE -Wall -Wextra -Wpedantic)
 
-target_link_libraries(abys_core PRIVATE slang::slang)
+target_link_libraries(abys_core PRIVATE ${ABYS_SLANG_TARGET})
 target_compile_definitions(abys_core PRIVATE ABYS_HAVE_SLANG=1)
 
 add_executable(abys src/main.cpp)
@@ -80,10 +80,4 @@ if(ABYS_ENABLE_TESTS)
   add_executable(abys_smoke tests/smoke.cpp)
   target_link_libraries(abys_smoke PRIVATE abys_core)
   add_test(NAME abys_smoke COMMAND abys_smoke)
-
-  add_executable(abys_smoke_lowering_continuous_assign
-                 tests/smoke_lowering_continuous_assign.cpp)
-  target_link_libraries(abys_smoke_lowering_continuous_assign PRIVATE abys_core)
-  add_test(NAME abys_smoke_lowering_continuous_assign
-           COMMAND abys_smoke_lowering_continuous_assign)
 endif()

@@ -17,7 +17,12 @@ if [ ! -f "$compdb" ]; then
   exit 1
 fi
 
-mapfile -t files < <(git ls-files 'src/*.cpp' 'src/**/*.cpp' 'tests/*.cpp' 'tests/**/*.cpp')
+mapfile -t files < <(
+  git ls-files 'src/*.cpp' 'src/**/*.cpp' 'tests/*.cpp' 'tests/**/*.cpp' |
+    while IFS= read -r file; do
+      [[ -f "$file" ]] && printf '%s\n' "$file"
+    done
+)
 if [ ${#files[@]} -eq 0 ]; then
   echo "No source files to lint."
   exit 0
