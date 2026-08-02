@@ -16,8 +16,8 @@ public:
   explicit ExprBuilder(ExprGraph &graph);
   explicit ExprBuilder(const ExprBuilder &parent);
 
-  ExprId get_constant_zero() const;
-  ExprId get_constant_one() const;
+  static ExprId get_constant_zero();
+  static ExprId get_constant_one();
 
   ExprGraph::Node &get_node(ExprId id);
   SignalWidth get_width(ExprId id) const;
@@ -39,7 +39,7 @@ public:
   ExprId create_or(std::vector<ExprId> operands);
   ExprId create_xor(std::vector<ExprId> operands);
 
-  ExprId create_unary_plus(ExprId a); // nop
+  static ExprId create_unary_plus(ExprId a); // nop
   ExprId create_unary_minus(ExprId a);
 
   ExprId create_logical_and(ExprId a, ExprId b);
@@ -76,7 +76,7 @@ public:
 
   ExprId create_concat(std::vector<ExprId> operands, bool sign = false);
 
-  BitIndex normalize_index(BitIndex index, BitIndex msb, BitIndex lsb);
+  static BitIndex normalize_index(BitIndex index, BitIndex msb, BitIndex lsb);
   ExprId normalize_index_expr(ExprId index, BitIndex msb, BitIndex lsb);
 
   // TODO: think whether we should handle unpacked array select/range differently

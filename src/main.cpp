@@ -2,6 +2,7 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "abys/frontend/api.h"
@@ -10,11 +11,11 @@
 
 namespace {
 
-bool is_version_flag(const std::string &arg) {
+bool is_version_flag(std::string_view arg) {
   return arg == "-v" || arg == "--version";
 }
 
-bool is_help_flag(const std::string &arg) {
+bool is_help_flag(std::string_view arg) {
   return arg == "-h" || arg == "--help";
 }
 
@@ -45,21 +46,25 @@ int main(int argc, char **argv) {
     }
   }
 
-  std::string command = argv[1];
+  const std::string_view command = argv[1];
   if (command == "parse") {
     std::vector<std::string> files;
     std::optional<std::string> top;
 
     for (int i = 2; i < argc; ++i) {
-      std::string arg = argv[i];
-      if (arg == "--top" && i + 1 < argc) {
+      const std::string_view arg = argv[i];
+      if (arg == "--top") {
+        if (i + 1 >= argc) {
+          std::cerr << "parse failed: --top requires a module name\n";
+          return 2;
+        }
         top = argv[++i];
         continue;
       }
-      files.push_back(arg);
+      files.emplace_back(arg);
     }
 
-    auto result = abys::parse_systemverilog(files, top);
+    const auto result = abys::parse_systemverilog(files, top);
     if (!result.ok) {
       std::cerr << "parse failed: " << result.message << '\n';
       return 2;
@@ -75,19 +80,27 @@ int main(int argc, char **argv) {
     std::optional<std::string> out_path;
 
     for (int i = 2; i < argc; ++i) {
-      std::string arg = argv[i];
-      if (arg == "--top" && i + 1 < argc) {
+      const std::string_view arg = argv[i];
+      if (arg == "--top") {
+        if (i + 1 >= argc) {
+          std::cerr << "emit failed: --top requires a module name\n";
+          return 2;
+        }
         top = argv[++i];
         continue;
       }
-      if (arg == "--out" && i + 1 < argc) {
+      if (arg == "--out") {
+        if (i + 1 >= argc) {
+          std::cerr << "emit failed: --out requires a file path\n";
+          return 2;
+        }
         out_path = argv[++i];
         continue;
       }
-      files.push_back(arg);
+      files.emplace_back(arg);
     }
 
-    auto result = abys::build_tig_from_systemverilog(files, top);
+    const auto result = abys::build_tig_from_systemverilog(files, top);
     if (!result.ok) {
       std::cerr << "emit failed: " << result.message << '\n';
       return 2;
@@ -95,12 +108,12 @@ int main(int argc, char **argv) {
 
     abys::ir::VerilogEmitter emitter(result.design);
     if (out_path) {
-      std::ofstream ofs(*out_path);
-      if (!ofs) {
+      std::ofstream output_stream(*out_path);
+      if (!output_stream) {
         std::cerr << "emit failed: cannot open output file: " << *out_path << '\n';
         return 3;
       }
-      emitter.emit(ofs);
+      emitter.emit(output_stream);
     } else {
       emitter.emit(std::cout);
     }

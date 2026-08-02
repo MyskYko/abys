@@ -2,7 +2,10 @@
 #include <bitset>
 #include <cassert>
 #include <cmath>
+#include <cstdlib>
+#include <limits>
 #include <stdexcept>
+#include <utility>
 
 #include "abys/ir/expr_builder.h"
 
@@ -32,11 +35,11 @@ bool ExprBuilder::is_sequence(ExprId id) const {
   return graph_.nodes[id].op == ExprGraph::Op::kSequence;
 }
 
-ExprId ExprBuilder::get_constant_zero() const {
-  return graph_.constant_zero;
+ExprId ExprBuilder::get_constant_zero() {
+  return ExprGraph::constant_zero;
 }
-ExprId ExprBuilder::get_constant_one() const {
-  return graph_.constant_one;
+ExprId ExprBuilder::get_constant_one() {
+  return ExprGraph::constant_one;
 }
 
 ExprId ExprBuilder::find_or_create_input(std::string name, SignalWidth width, bool sign) {
@@ -59,12 +62,12 @@ ExprId ExprBuilder::find_or_create_input(std::string name, SignalWidth width, bo
 }
 
 ExprId ExprBuilder::find_or_create_const(std::string value, SignalWidth width, bool sign) {
-  if (width == 1 && sign == false) {
+  if (width == 1 && !sign) {
     if (value == "1'b0") {
-      return graph_.constant_zero;
+      return ExprGraph::constant_zero;
     }
     if (value == "1'b1") {
-      return graph_.constant_one;
+      return ExprGraph::constant_one;
     }
   }
   // TODO: x and z fall through; verify it works with other parts
@@ -91,7 +94,7 @@ ExprId ExprBuilder::find_or_create_const(BitIndex index) {
   if (index == 1) {
     id = get_constant_one();
   } else {
-    std::bitset<SignalWidthBitSize> bits(index);
+    std::bitset<kSignalWidthBitSize> bits(index);
     std::string str = bits.to_string();
     size_t pos = str.find_first_not_of('0');
     assert(pos != std::string::npos);
@@ -343,7 +346,7 @@ ExprId ExprBuilder::create_mux(ExprId cond, ExprId then, ExprId else_id) {
     node.width = else_node.width;
     node.sign = else_node.sign;
   } else {
-    assert(false);
+    throw std::logic_error("Mux requires at least one valid data operand");
   }
   node.operands = {cond, then, else_id};
   return id;
@@ -551,7 +554,8 @@ ExprId ExprBuilder::create_masked_assign(ExprId current, ExprId next, ExprId bas
                                          SignalWidth slice_width, SignalWidth width, bool sign) {
   assert(current != kInvalidExprId);
   assert(slice_width > 0);
-  const ExprId slice_width_id = find_or_create_const(slice_width);
+  assert(slice_width <= static_cast<SignalWidth>(std::numeric_limits<BitIndex>::max()));
+  const ExprId slice_width_id = find_or_create_const(static_cast<BitIndex>(slice_width));
   const ExprId id = create_node();
   auto &node = get_node(id);
   node.op = ExprGraph::Op::kMaskedAssign;
@@ -590,7 +594,7 @@ ExprId ExprBuilder::unpacked_assign_part_select(ExprId next, ExprId base, Signal
     next = create_reverse(next);
   }
   if (slice_width > 1) {
-    const ExprId offset = find_or_create_const(slice_width - 1);
+    const ExprId offset = find_or_create_const(static_cast<BitIndex>(slice_width - 1));
     if (dir) {
       if (msb < lsb) {
         low = create_add(base, offset);
@@ -602,7 +606,7 @@ ExprId ExprBuilder::unpacked_assign_part_select(ExprId next, ExprId base, Signal
     }
   }
   const ExprId base_id = normalize_index_expr(low, msb, lsb);
-  const ExprId width_id = find_or_create_const(slice_width);
+  const ExprId width_id = find_or_create_const(static_cast<BitIndex>(slice_width));
   return create_unpacked_assign(next, base_id, width_id, width, sign);
 }
 
@@ -989,7 +993,7 @@ int ExprBuilder::evaluate(ExprId id) const {
   case ExprGraph::Op::kMod: // TODO: handle unsynthesizable if not constant
     return evaluate(node.operands[0]) % evaluate(node.operands[1]);
   case ExprGraph::Op::kPow: // TODO: handle unsynthesizable if not constant
-    return std::pow(evaluate(node.operands[0]), evaluate(node.operands[1]));
+    return static_cast<int>(std::pow(evaluate(node.operands[0]), evaluate(node.operands[1])));
   case ExprGraph::Op::kShl:
     return evaluate(node.operands[0]) << evaluate(node.operands[1]);
   case ExprGraph::Op::kShr:

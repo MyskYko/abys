@@ -31,7 +31,7 @@ void VerilogEmitter::emit_module(const Module &module, std::ostream &os) const {
   emit_module_footer(os);
 }
 
-void VerilogEmitter::emit_module_header(const Module &module, std::ostream &os) const {
+void VerilogEmitter::emit_module_header(const Module &module, std::ostream &os) {
   os << "module " << module.name << " (\n";
   bool first = true;
   for (const auto &input : module.input_ports) {
@@ -67,7 +67,7 @@ void VerilogEmitter::emit_module_header(const Module &module, std::ostream &os) 
   os << ");\n\n";
 }
 
-void VerilogEmitter::emit_signal_decls(const Module &module, std::ostream &os) const {
+void VerilogEmitter::emit_signal_decls(const Module &module, std::ostream &os) {
   std::unordered_set<std::string> port_names;
   for (const auto &p : module.input_ports) {
     port_names.insert(p.name);
@@ -76,7 +76,7 @@ void VerilogEmitter::emit_signal_decls(const Module &module, std::ostream &os) c
     port_names.insert(p.name);
   }
   for (const auto &var : module.variables) {
-    if (port_names.count(var.name)) {
+    if (port_names.contains(var.name)) {
       continue;
     }
     os << "  ";
@@ -94,7 +94,7 @@ void VerilogEmitter::emit_signal_decls(const Module &module, std::ostream &os) c
     os << var.name << ";\n";
   }
   for (const auto &var : module.unpacked_variables) {
-    if (port_names.count(var.name)) {
+    if (port_names.contains(var.name)) {
       continue;
     }
     os << "  ";
@@ -383,8 +383,8 @@ void VerilogEmitter::emit_exprs(const std::vector<std::string> &lhs_names, bool 
 }
 
 void VerilogEmitter::emit_expr_unpacked(
-    std::string lhs, bool is_nonblocking, bool is_merge, const ExprGraph &expr_graph, ExprId id,
-    std::map<ExprId, std::string> &names, std::ostream &decl_os, std::ostream &os,
+    const std::string &lhs, bool is_nonblocking, bool is_merge, const ExprGraph &expr_graph,
+    ExprId id, std::map<ExprId, std::string> &names, std::ostream &decl_os, std::ostream &os,
     std::ostream &assign_os, std::string_view indent,
     const std::unordered_map<std::string, bool> *assumptions) const {
   if (id == kInvalidExprId) {
@@ -405,7 +405,7 @@ void VerilogEmitter::emit_expr_unpacked(
     std::ostringstream selected_lhs;
     selected_lhs << lhs << "["
                  << emit_expr_packed(expr_graph, base, names, decl_os, os, indent, assumptions);
-    if (slice_width != expr_graph.constant_one) {
+    if (slice_width != ExprGraph::constant_one) {
       selected_lhs << " +: "
                    << emit_expr_packed(expr_graph, slice_width, names, decl_os, os, indent,
                                        assumptions);
@@ -435,7 +435,7 @@ void VerilogEmitter::emit_expr_unpacked(
     std::ostringstream selected_lhs;
     selected_lhs << lhs << "["
                  << emit_expr_packed(expr_graph, base, names, decl_os, os, indent, assumptions);
-    if (slice_width != expr_graph.constant_one) {
+    if (slice_width != ExprGraph::constant_one) {
       selected_lhs << " +: "
                    << emit_expr_packed(expr_graph, slice_width, names, decl_os, os, indent,
                                        assumptions);
@@ -616,7 +616,7 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
         return kv.first;
       }
     }
-    assert(false);
+    throw std::logic_error("Input expression has no registered name");
   case ExprGraph::Op::kConst:
     for (const auto &c : expr_graph.constants) {
       if (c.id == id) {
@@ -624,7 +624,7 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
         return c.value;
       }
     }
-    assert(false);
+    throw std::logic_error("Constant expression has no registered value");
   case ExprGraph::Op::kLogicalNot: {
     return emit_unary("!");
   }
@@ -770,7 +770,7 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
   case ExprGraph::Op::kReverse: {
     const ExprId operand_id = node.operands[0];
     const auto &operand_node = expr_graph.nodes[operand_id];
-    const std::string operand =
+    std::string operand =
         emit_expr_packed(expr_graph, operand_id, names, decl_os, os, indent, assumptions);
     if (operand_node.width <= 1) {
       names[id] = operand;
@@ -894,7 +894,7 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     declare_temp(node, name);
     os << indent << name << " = " << current << ";\n";
     os << indent << name << "[" << base;
-    if (slice_width_id != expr_graph.constant_one) {
+    if (slice_width_id != ExprGraph::constant_one) {
       os << " +: " << slice_width;
     }
     os << "] = " << next << ";\n";
@@ -929,7 +929,7 @@ void VerilogEmitter::emit_expr_inline(
         return;
       }
     }
-    assert(false);
+    throw std::logic_error("Input expression has no registered name");
   }
   case ExprGraph::Op::kConst: { // TODO: use map
     for (const auto &c : expr_graph.constants) {
@@ -938,7 +938,7 @@ void VerilogEmitter::emit_expr_inline(
         return;
       }
     }
-    assert(false);
+    throw std::logic_error("Constant expression has no registered value");
   }
   case ExprGraph::Op::kLogicalNot:
     os << "(!";
@@ -1196,11 +1196,11 @@ void VerilogEmitter::emit_expr_inline(
   }
   default:
     // kBothEdge
-    assert(false);
+    throw std::logic_error("Unsupported inline expression operation");
   }
 }
 
-bool VerilogEmitter::can_emit_direct_range_base(const ExprGraph &expr_graph, ExprId id) const {
+bool VerilogEmitter::can_emit_direct_range_base(const ExprGraph &expr_graph, ExprId id) {
   if (id == kInvalidExprId) {
     return false;
   }
@@ -1230,7 +1230,7 @@ void VerilogEmitter::emit_shifted_range(
   os << ")";
 }
 
-void VerilogEmitter::emit_module_footer(std::ostream &os) const {
+void VerilogEmitter::emit_module_footer(std::ostream &os) {
   os << "endmodule\n";
 }
 

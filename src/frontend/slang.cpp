@@ -1,4 +1,11 @@
 #include "abys/frontend/api.h"
+
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
 #include "abys/frontend/slang_lowering.h"
 #include "abys/frontend/slang_pragma.h"
 #include "abys/ir/tig.h"
@@ -62,12 +69,11 @@ ParseResult parse_systemverilog(const std::vector<std::string> &files,
 
 ir::TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &files,
                                                 const std::optional<std::string> &top) {
-  ir::Tig design;
-
   if (files.empty()) {
     return {false, "no input files provided", {}};
   }
 
+  ir::Tig design;
   slang::driver::Driver driver;
   driver.addStandardArgs();
   add_default_translate_off_formats(driver);

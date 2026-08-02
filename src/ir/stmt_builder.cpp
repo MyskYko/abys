@@ -1,6 +1,7 @@
 #include <cassert>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 
 #include "abys/ir/stmt_builder.h"
 
@@ -137,7 +138,7 @@ void StmtBuilder::transfer_output(const Context &from, size_t i, ExprId expr_id)
   output_ids().push_back(expr_id);
 }
 
-std::vector<size_t> StmtBuilder::collect_last_output_indices(Context &ctx) {
+std::vector<size_t> StmtBuilder::collect_last_output_indices(Context &ctx) const {
   std::unordered_map<std::string, size_t> last_index;
   for (size_t i = 0; i < ctx.output_names.size(); ++i) {
     const std::string &name = ctx.output_names[i];
@@ -172,7 +173,7 @@ void StmtBuilder::merge_context() {
   Context child = std::move(contexts_.back());
   contexts_.pop_back();
   for (size_t i : collect_last_output_indices(child)) {
-    if (child.local_names.count(child.output_names[i])) {
+    if (child.local_names.contains(child.output_names[i])) {
       continue;
     }
     transfer_output(child, i, child.output_ids[i]);
@@ -194,7 +195,7 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
   }
   std::unordered_map<std::string, size_t> shared_output_to_else_index;
   for (size_t i : else_indices) {
-    if (then_outputs.count(else_ctx.output_names[i])) {
+    if (then_outputs.contains(else_ctx.output_names[i])) {
       shared_output_to_else_index[else_ctx.output_names[i]] = i;
     }
   }
@@ -244,7 +245,7 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
   for (size_t i : else_indices) {
     assert(else_ctx.local_names.empty());
     const std::string &name = else_ctx.output_names[i];
-    if (shared_output_to_else_index.count(name)) {
+    if (shared_output_to_else_index.contains(name)) {
       continue;
     }
     // not shared
@@ -304,8 +305,8 @@ void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case
     case_output_nonblocking[entry.second].resize(context_stack_.size() - stack_index, false);
     const size_t branch_count = case_output_ids[entry.second].size();
     bool is_first = true;
-    bool is_nonblocking;
-    bool is_sequence;
+    bool is_nonblocking = false;
+    bool is_sequence = false;
     for (size_t j = 0; j < branch_count; ++j) {
       if (case_output_ids[entry.second][j] != kInvalidExprId) {
         if (is_first) {
@@ -382,39 +383,38 @@ void StmtBuilder::get_timing_spec(const std::vector<std::pair<std::string, ExprI
     ExprId input_id;
     get_input_spec(0, input_id, clk_name, clk_width, clk_sign, clk_edge);
     return;
-  } else {
-    for (int i = 0; i < 2; ++i) {
-      // TODO: check if rst is used only as an if-cond for debugging
-      ExprId input_id;
-      std::string name;
-      SignalWidth width;
-      bool sign;
-      EdgeKind edge;
-      get_input_spec(i, input_id, name, width, sign, edge);
-      bool fUsed = false;
-      for (const auto &kv : outputs) {
-        if (expr_builder.check_dependency(kv.second, input_id)) {
-          fUsed = true;
-          break;
-        }
+  }
+  for (int i = 0; i < 2; ++i) {
+    // TODO: check if rst is used only as an if-cond for debugging
+    ExprId input_id;
+    std::string name;
+    SignalWidth width;
+    bool sign;
+    EdgeKind edge;
+    get_input_spec(i, input_id, name, width, sign, edge);
+    bool is_used = false;
+    for (const auto &kv : outputs) {
+      if (expr_builder.check_dependency(kv.second, input_id)) {
+        is_used = true;
+        break;
       }
-      if (fUsed) {
-        if (!rst_name.empty()) {
-          throw std::logic_error("Ambiguous reset inference");
-        }
-        rst_name = name;
-        rst_width = width;
-        rst_sign = sign;
-        rst_edge = edge;
-      } else {
-        if (!clk_name.empty()) {
-          throw std::logic_error("Ambiguous clock inference");
-        }
-        clk_name = name;
-        clk_width = width;
-        clk_sign = sign;
-        clk_edge = edge;
+    }
+    if (is_used) {
+      if (!rst_name.empty()) {
+        throw std::logic_error("Ambiguous reset inference");
       }
+      rst_name = name;
+      rst_width = width;
+      rst_sign = sign;
+      rst_edge = edge;
+    } else {
+      if (!clk_name.empty()) {
+        throw std::logic_error("Ambiguous clock inference");
+      }
+      clk_name = name;
+      clk_width = width;
+      clk_sign = sign;
+      clk_edge = edge;
     }
   }
   // TODO: handle iff (enable) too

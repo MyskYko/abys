@@ -3,11 +3,14 @@
 #include <cassert>
 #include <cctype>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <typeinfo>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "slang/ast/ASTVisitor.h"
@@ -36,7 +39,7 @@ namespace abys::frontend {
 
 using namespace abys::ir;
 
-static inline const char *definitionKindToString(slang::ast::DefinitionKind kind) {
+inline const char *definition_kind_to_string(slang::ast::DefinitionKind kind) {
   switch (kind) {
   case slang::ast::DefinitionKind::Module:
     return "Module";
@@ -49,21 +52,25 @@ static inline const char *definitionKindToString(slang::ast::DefinitionKind kind
   }
 }
 
-static inline abys::ir::SignalWidth expr_width(const slang::ast::Expression &expr) {
+inline abys::ir::SignalWidth expr_width(const slang::ast::Expression &expr) {
   return expr.type->getBitstreamWidth();
 }
 
-static inline bool expr_sign(const slang::ast::Expression &expr) {
+inline bool expr_sign(const slang::ast::Expression &expr) {
   return expr.type->isSigned();
 }
 
-std::string make_verilog_identifier(std::string_view name) {
-  auto is_head = [](unsigned char c) { return std::isalpha(c) || c == '_'; };
-  auto is_body = [](unsigned char c) { return std::isalnum(c) || c == '_' || c == '$'; };
+inline std::string make_verilog_identifier(std::string_view name) {
+  auto is_head = [](unsigned char character) {
+    return std::isalpha(character) != 0 || character == '_';
+  };
+  auto is_body = [](unsigned char character) {
+    return std::isalnum(character) != 0 || character == '_' || character == '$';
+  };
   if (!name.empty() && is_head(static_cast<unsigned char>(name.front()))) {
     bool simple = true;
-    for (char c : name) {
-      if (!is_body(static_cast<unsigned char>(c))) {
+    for (char character : name) {
+      if (!is_body(static_cast<unsigned char>(character))) {
         simple = false;
         break;
       }
@@ -76,7 +83,7 @@ std::string make_verilog_identifier(std::string_view name) {
   return "\\" + std::string(name) + " ";
 }
 
-std::string
+inline std::string
 lower_symbol_name(const slang::ast::Symbol &symbol,
                   std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols) {
   auto it = special_symbols.find(&symbol);
@@ -86,7 +93,7 @@ lower_symbol_name(const slang::ast::Symbol &symbol,
   return make_verilog_identifier(symbol.name);
 }
 
-std::string
+inline std::string
 register_symbol_name(const slang::ast::Symbol &symbol,
                      std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols,
                      std::string_view suffix = "") {
@@ -97,7 +104,7 @@ register_symbol_name(const slang::ast::Symbol &symbol,
   return name;
 }
 
-std::string
+inline std::string
 extract_named_value(const slang::ast::Expression &expr,
                     std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols) {
   assert(expr.kind == slang::ast::ExpressionKind::NamedValue);
@@ -105,20 +112,20 @@ extract_named_value(const slang::ast::Expression &expr,
   return lower_symbol_name(named.symbol, special_symbols);
 }
 
-BitIndex extract_constant_index(const slang::ast::Expression &expr) {
-  const auto cv = expr.getConstant();
-  if (!cv || !*cv || !cv->isInteger()) {
+inline BitIndex extract_constant_index(const slang::ast::Expression &expr) {
+  const auto *const constant_value = expr.getConstant();
+  if (!constant_value || !*constant_value || !constant_value->isInteger()) {
     throw std::logic_error("Expected integer constant");
   }
-  const slang::SVInt &sv = cv->integer();
-  auto v = sv.as<int64_t>();
-  if (!v) {
+  const slang::SVInt &integer_value = constant_value->integer();
+  const auto index = integer_value.as<int64_t>();
+  if (!index) {
     throw std::logic_error("SVInt too wide for int64");
   }
-  return *v;
+  return *index;
 }
 
-void get_width_sign(const slang::ast::Type &type, SignalWidth &width, bool &sign) {
+inline void get_width_sign(const slang::ast::Type &type, SignalWidth &width, bool &sign) {
   if (type.isUnpackedArray()) {
     const auto &ct = type.getCanonicalType();
     if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
@@ -190,12 +197,12 @@ public:
   }
 
   void handle(const slang::ast::StringLiteral &expr) {
-    const auto cv = expr.getConstant();
-    if (!cv || !*cv || !cv->isInteger()) {
+    const auto *const constant_value = expr.getConstant();
+    if (!constant_value || !*constant_value || !constant_value->isInteger()) {
       throw std::logic_error("String literal did not lower to integer constant");
     }
-    const slang::SVInt v = cv->integer();
-    ExprId id = builder_.find_or_create_const(v.toString(slang::LiteralBase::Binary),
+    const slang::SVInt integer_value = constant_value->integer();
+    ExprId id = builder_.find_or_create_const(integer_value.toString(slang::LiteralBase::Binary),
                                               expr_width(expr), expr_sign(expr));
     expr_stack_.push_back(id);
   }
@@ -210,11 +217,11 @@ public:
   void handle(const slang::ast::CallExpression &expr) {
     // TODO: it seems some parameters do not get evaluated as a constant, so remembering system call
     // may be necessary as well, then cv stuff may not be needed any longer
-    const auto cv = expr.getConstant();
-    if (cv && *cv && cv->isInteger()) {
-      const slang::SVInt v = cv->integer();
-      const ExprId id = builder_.find_or_create_const(v.toString(slang::LiteralBase::Binary),
-                                                      expr_width(expr), expr_sign(expr));
+    const auto *const constant_value = expr.getConstant();
+    if (constant_value && *constant_value && constant_value->isInteger()) {
+      const slang::SVInt integer_value = constant_value->integer();
+      const ExprId id = builder_.find_or_create_const(
+          integer_value.toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr));
       expr_stack_.push_back(id);
       return;
     }
@@ -613,8 +620,9 @@ public:
   }
 };
 
-ExprId build_expr(const slang::ast::Expression &expr, ExprBuilder &expr_builder,
-                  std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols) {
+inline ExprId
+build_expr(const slang::ast::Expression &expr, ExprBuilder &expr_builder,
+           std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols) {
   SlangExprLoweringVisitor<ExprBuilder> expr_visitor(expr_builder, special_symbols);
   expr.visit(expr_visitor);
   return expr_visitor.get_root();
@@ -627,7 +635,8 @@ void lower_lhs_assignment(
     std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols,
     const std::unordered_map<std::string, ExprId> *scheduled_assignments, EmitFn &&record) {
   assert(rhs_width > 0);
-  BitIndex remaining = rhs_width;
+  assert(rhs_width <= static_cast<SignalWidth>(std::numeric_limits<BitIndex>::max()));
+  SignalWidth remaining = rhs_width;
 
   auto extract_lhs_base_name = [&](auto &&self, const slang::ast::Expression &lhs) -> std::string {
     if (lhs.kind == slang::ast::ExpressionKind::NamedValue) {
@@ -649,10 +658,10 @@ void lower_lhs_assignment(
     SignalWidth width;
     bool sign;
     get_width_sign(*lhs.type, width, sign);
-    assert(remaining >= static_cast<BitIndex>(width));
+    assert(remaining >= width);
     if (width != rhs_width) {
-      const BitIndex left = remaining - 1;
-      const BitIndex right = remaining - width;
+      const BitIndex left = static_cast<BitIndex>(remaining - 1);
+      const BitIndex right = static_cast<BitIndex>(remaining - width);
       expr_id = expr_builder.create_simple_range(rhs_id, left, right,
                                                  static_cast<BitIndex>(rhs_width - 1), 0);
     }
@@ -794,7 +803,8 @@ void lower_lhs_assignment(
           ExprId index_id = build_expr(sel.left(), expr_builder, special_symbols);
           assert(expr_builder.get_width(updated_expr_id) == width);
           if (width > 1) {
-            const ExprId offset_id = expr_builder.find_or_create_const(width - 1);
+            const ExprId offset_id =
+                expr_builder.find_or_create_const(static_cast<BitIndex>(width - 1));
             if (kind == slang::ast::RangeSelectionKind::IndexedUp) {
               if (range.left < range.right) {
                 index_id = expr_builder.create_add(index_id, offset_id);
@@ -878,7 +888,7 @@ public:
     throw std::logic_error(std::string("Unhandled AST node: ") + typeid(T).name());
   }
 
-  void handle(const slang::ast::EmptyStatement &) { return; }
+  void handle(const slang::ast::EmptyStatement &) {}
 
   void handle(const slang::ast::VariableDeclStatement &stmt) {
     const auto &symbol = stmt.symbol;
@@ -964,7 +974,7 @@ public:
     lower_lhs_assignment(
         assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), special_symbols_,
         &builder_.scheduled_assignments(), [&](const std::string &output_name, ExprId expr_id) {
-          if (nonblocking && !to_restore.count(output_name)) {
+          if (nonblocking && !to_restore.contains(output_name)) {
             to_restore[output_name] = builder_.get_expr_builder().get_current_value(output_name);
           }
           builder_.get_expr_builder().update_value(output_name, expr_id);
@@ -1014,10 +1024,11 @@ public:
     size_t index = builder_.get_context_stack_index();
     ExprId case_id = build_expr(stmt.expr, builder_.get_expr_builder(), special_symbols_);
     std::vector<ExprId> case_values;
-    for (auto &item : stmt.items) {
+    for (const auto &item : stmt.items) {
       std::vector<ExprId> values;
-      for (auto *v : item.expressions) {
-        values.push_back(build_expr(*v, builder_.get_expr_builder(), special_symbols_));
+      for (const auto *value_expression : item.expressions) {
+        values.push_back(
+            build_expr(*value_expression, builder_.get_expr_builder(), special_symbols_));
       }
       ExprId value_id = kInvalidExprId;
       if (values.size() > 1) {
@@ -1050,7 +1061,7 @@ public:
   void handle(const slang::ast::ForLoopStatement &stmt) {
     if (!stmt.loopVars.empty()) {
       builder_.create_context();
-      for (auto var : stmt.loopVars) {
+      for (const auto *var : stmt.loopVars) {
         const std::string name(var->name);
         builder_.add_local_variable(name);
         if (const auto *init = var->getInitializer()) {
@@ -1063,7 +1074,7 @@ public:
         }
       }
     }
-    for (auto init : stmt.initializers) {
+    for (const auto *init : stmt.initializers) {
       if (!init) {
         continue;
       }
@@ -1098,7 +1109,7 @@ public:
         break;
       }
       stmt.body.visit(*this);
-      for (auto step : stmt.steps) {
+      for (const auto *step : stmt.steps) {
         if (!step) {
           continue;
         }
@@ -1340,7 +1351,7 @@ public:
     const auto &definition = symbol.getDefinition();
     if (definition.definitionKind != slang::ast::DefinitionKind::Module) {
       throw std::logic_error(std::string("Unhandled definition kind: ") +
-                             definitionKindToString(definition.definitionKind));
+                             definition_kind_to_string(definition.definitionKind));
     }
 
     if (module_ids_.contains(&symbol)) {
@@ -1368,20 +1379,24 @@ public:
       const ModuleId module_id = current_module_id();
 
       const auto &body = symbol.getCanonicalBody() ? *symbol.getCanonicalBody() : symbol.body;
-      auto it = module_ids_.find(&body);
-      assert(it != module_ids_.end());
+      const auto it = module_ids_.find(&body);
+      if (it == module_ids_.end()) {
+        throw std::logic_error("Instance references an unknown module body");
+      }
       const ModuleId instance_module_id = it->second;
 
       const NodeId node_id = builder_.create_instance(module_id, std::string(symbol.name) + suffix_,
                                                       instance_module_id);
 
       for (const auto *conn : symbol.getPortConnections()) {
-        assert(conn);
+        if (!conn) {
+          throw std::logic_error("Instance contains a null port connection");
+        }
         const auto &port_symbol = conn->port;
-        assert(port_symbol.kind == slang::ast::SymbolKind::Port);
+        if (port_symbol.kind != slang::ast::SymbolKind::Port) {
+          throw std::logic_error("Instance connection does not reference a port symbol");
+        }
         const auto &port = port_symbol.as<slang::ast::PortSymbol>();
-        assert(port.direction != slang::ast::ArgumentDirection::InOut);
-        assert(port.direction != slang::ast::ArgumentDirection::Ref);
         const slang::ast::Expression *expr = conn->getExpression();
         if (port.direction == slang::ast::ArgumentDirection::In) {
           if (!expr) {
@@ -1405,7 +1420,9 @@ public:
             builder_.add_node_output(module_id, node_id, "", 0, false);
             continue;
           }
-          assert(expr->kind == slang::ast::ExpressionKind::Assignment);
+          if (expr->kind != slang::ast::ExpressionKind::Assignment) {
+            throw std::logic_error("Output port connection is not an assignment expression");
+          }
           const auto &assign = expr->as<slang::ast::AssignmentExpression>();
           const auto &lhs = assign.left();
           SignalWidth rhs_width = port_width(port); // TODO: handle unpacked array
@@ -1413,9 +1430,11 @@ public:
           NodeId output_node_id = node_id;
           ExprId output_expr_id = kInvalidExprId;
           if (assign.right().kind != slang::ast::ExpressionKind::EmptyArgument) {
-            assert(assign.right().kind == slang::ast::ExpressionKind::Conversion);
-            const auto &conv = assign.right().as<slang::ast::ConversionExpression>();
-            assert(conv.operand().kind == slang::ast::ExpressionKind::EmptyArgument);
+            if (assign.right().kind != slang::ast::ExpressionKind::Conversion ||
+                assign.right().as<slang::ast::ConversionExpression>().operand().kind !=
+                    slang::ast::ExpressionKind::EmptyArgument) {
+              throw std::logic_error("Unsupported output port conversion expression");
+            }
             const std::string temporary_name =
                 builder_.create_temporary_signal(module_id, rhs_width, rhs_sign);
             const PortIndex port_idx =
@@ -1464,7 +1483,7 @@ public:
             }
           }
         } else {
-          assert(false);
+          throw std::logic_error("Unsupported instance port direction");
         }
       }
 
@@ -1650,7 +1669,7 @@ public:
     Tig::Subroutine subr;
     subr.subr_ptr = &symbol;
     subr.name = std::string(symbol.name);
-    for (auto *arg : symbol.getArguments()) {
+    for (const auto *arg : symbol.getArguments()) {
       // TODO: handle packed/unpacked array
       if (arg->direction != slang::ast::ArgumentDirection::In) {
         throw std::logic_error("Only input formals are supported in function lowering: " +

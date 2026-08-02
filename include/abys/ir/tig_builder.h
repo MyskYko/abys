@@ -33,7 +33,7 @@ public:
   using PendingFf = Tig::Module::PendingFf;
 
 private:
-  std::vector<std::vector<std::vector<SignalSpec>>> input_specs;
+  std::vector<std::vector<std::vector<SignalSpec>>> input_specs_;
 
   NodeId create_node(ModuleId module_id, NodeKind kind);
   void add_signal(ModuleId module_id, std::string name, Signal signal);
@@ -82,9 +82,9 @@ public:
 
   void set_node_input(ModuleId module_id, NodeId node_id, PortIndex port_idx, Signal input);
 
-  Signal get_node_input(ModuleId module_id, NodeId node_id, PortIndex port_idx);
+  Signal get_node_input(ModuleId module_id, NodeId node_id, PortIndex port_idx) const;
 
-  SignalSpec get_signal_spec(ModuleId module_id, Signal signal);
+  SignalSpec get_signal_spec(ModuleId module_id, Signal signal) const;
 };
 
 } // namespace abys::ir

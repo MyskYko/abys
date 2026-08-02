@@ -65,7 +65,7 @@ public:
   template <typename Func> void for_each_output(Func &&func) {
     assert(!is_undecided()); // we don't allow always without any timing
     struct OutputInfo {
-      ExprId expr_id = 0;
+      ExprId expr_id = kInvalidExprId;
       bool seen_blocking = false;
       bool seen_nonblocking = false;
     };
@@ -91,7 +91,7 @@ public:
 private:
   ExprGraph &expr_graph_;
 
-  enum class Policy { Comb, Latch, CombOrLatch, Ff, Undecided };
+  enum class Policy : uint8_t { Comb, Latch, CombOrLatch, Ff, Undecided };
 
   Policy policy_ = Policy::Undecided;
 
@@ -109,7 +109,7 @@ private:
 
   ExprId fallback_value(const std::string &name) const;
   void transfer_output(const Context &from, size_t i, ExprId expr_id);
-  std::vector<size_t> collect_last_output_indices(Context &ctx);
+  std::vector<size_t> collect_last_output_indices(Context &ctx) const;
 
   struct TimingEvent {
     EdgeKind edge = EdgeKind::kNone;

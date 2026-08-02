@@ -5,9 +5,11 @@
 #include "slang/syntax/AllSyntax.h"
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/syntax/SyntaxVisitor.h"
+#include "slang/text/SourceLocation.h"
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -19,11 +21,11 @@ namespace abys::frontend {
 namespace {
 
 std::string normalize_pragma_comment(std::string_view raw) {
-  if (raw.size() >= 2 && raw.substr(0, 2) == "//") {
+  if (raw.starts_with("//")) {
     raw.remove_prefix(2);
-  } else if (raw.size() >= 2 && raw.substr(0, 2) == "/*") {
+  } else if (raw.starts_with("/*")) {
     raw.remove_prefix(2);
-    if (raw.size() >= 2 && raw.substr(raw.size() - 2) == "*/") {
+    if (raw.ends_with("*/")) {
       raw.remove_suffix(2);
     }
   }
@@ -34,8 +36,9 @@ std::string normalize_pragma_comment(std::string_view raw) {
     raw.remove_suffix(1);
   }
   std::string result(raw);
-  std::transform(result.begin(), result.end(), result.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  std::transform(result.begin(), result.end(), result.begin(), [](unsigned char character) {
+    return static_cast<char>(std::tolower(character));
+  });
   return result;
 }
 
@@ -67,7 +70,7 @@ bool is_synthesis_comment(std::string_view text) {
   while (pos < text.size() && !std::isspace(static_cast<unsigned char>(text[pos]))) {
     ++pos;
   }
-  return is_synthesis_pragma_prefix(std::string_view(text).substr(0, pos));
+  return is_synthesis_pragma_prefix(text.substr(0, pos));
 }
 
 class PragmaCollector final : public slang::syntax::SyntaxVisitor<PragmaCollector> {
@@ -84,8 +87,7 @@ public:
         if (name == "full_case") {
           info.full_case = true;
           handled = true;
-        }
-        if (name == "parallel_case") {
+        } else if (name == "parallel_case") {
           info.parallel_case = true;
           handled = true;
         }

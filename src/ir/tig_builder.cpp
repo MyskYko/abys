@@ -2,13 +2,13 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <iostream>
 #include <stdexcept>
-#include <string_view>
+#include <string>
 #include <unordered_map>
-
-#include "abys/ir/expr_builder.h"
-#include "abys/ir/tig_builder.h"
+#include <utility>
+#include <vector>
 
 namespace abys::ir {
 
@@ -44,13 +44,13 @@ void TigBuilder::add_signal(ModuleId module_id, std::string name, Signal signal)
 }
 
 void TigBuilder::add_input_spec(ModuleId module_id, NodeId node_id, SignalSpec input_spec) {
-  if (module_id >= static_cast<ModuleId>(input_specs.size())) {
-    input_specs.resize(module_id + 1);
+  if (module_id >= static_cast<ModuleId>(input_specs_.size())) {
+    input_specs_.resize(module_id + 1);
   }
-  if (node_id >= static_cast<NodeId>(input_specs[module_id].size())) {
-    input_specs[module_id].resize(node_id + 1);
+  if (node_id >= static_cast<NodeId>(input_specs_[module_id].size())) {
+    input_specs_[module_id].resize(node_id + 1);
   }
-  input_specs[module_id][node_id].push_back(std::move(input_spec));
+  input_specs_[module_id][node_id].push_back(std::move(input_spec));
 }
 
 TigBuilder::ModuleId TigBuilder::create_module(std::string name) {
@@ -171,21 +171,21 @@ void TigBuilder::add_node_input_spec(ModuleId module_id, NodeId node_id, std::st
 }
 
 void TigBuilder::finalize_node_input(ModuleId module_id, NodeId node_id) {
-  if (module_id >= static_cast<ModuleId>(input_specs.size())) {
+  if (module_id >= static_cast<ModuleId>(input_specs_.size())) {
     return;
   }
-  if (node_id >= static_cast<NodeId>(input_specs[module_id].size())) {
+  if (node_id >= static_cast<NodeId>(input_specs_[module_id].size())) {
     return;
   }
   bool fUseSpec = false;
-  for (SignalSpec const &input_spec : input_specs[module_id][node_id]) {
+  for (SignalSpec const &input_spec : input_specs_[module_id][node_id]) {
     if (!input_spec.name.empty()) {
       fUseSpec = true;
       break;
     }
   }
   if (!fUseSpec) {
-    input_specs[module_id][node_id].clear();
+    input_specs_[module_id][node_id].clear();
   }
 }
 
@@ -359,8 +359,8 @@ void TigBuilder::insert_ffs(ModuleId module_id) {
 
 void TigBuilder::wire_connections(ModuleId module_id) {
   Module &module = design_.modules[module_id];
-  for (size_t node_id = 0; node_id < input_specs[module_id].size(); ++node_id) {
-    auto &specs = input_specs[module_id][node_id];
+  for (size_t node_id = 0; node_id < input_specs_[module_id].size(); ++node_id) {
+    auto &specs = input_specs_[module_id][node_id];
     for (size_t i = 0; i < specs.size(); ++i) {
       const std::string &name = specs[i].name;
       if (!name.empty()) {
@@ -422,10 +422,10 @@ void TigBuilder::flatten_calls() {
           id_map.emplace(input_it->second, expr_graph.nodes[call_id].operands[j]);
         }
         for (const auto &constant : subr.expr_graph.constants) {
-          if (constant.id == subr.expr_graph.constant_zero) {
-            id_map.emplace(constant.id, expr_graph.constant_zero);
-          } else if (constant.id == subr.expr_graph.constant_one) {
-            id_map.emplace(constant.id, expr_graph.constant_one);
+          if (constant.id == ExprGraph::constant_zero) {
+            id_map.emplace(constant.id, ExprGraph::constant_zero);
+          } else if (constant.id == ExprGraph::constant_one) {
+            id_map.emplace(constant.id, ExprGraph::constant_one);
           } else {
             const auto &src = subr.expr_graph.nodes[constant.id];
             const ExprId dst_id = static_cast<ExprId>(expr_graph.nodes.size());
@@ -489,14 +489,14 @@ void TigBuilder::set_node_input(ModuleId module_id, NodeId node_id, PortIndex po
 }
 
 TigBuilder::Signal TigBuilder::get_node_input(ModuleId module_id, NodeId node_id,
-                                              PortIndex port_idx) {
-  Module &module = design_.modules[module_id];
+                                              PortIndex port_idx) const {
+  const Module &module = design_.modules[module_id];
   const Node &node = module.nodes[node_id];
   return node.inputs[port_idx];
 }
 
-TigBuilder::SignalSpec TigBuilder::get_signal_spec(ModuleId module_id, Signal signal) {
-  Module &module = design_.modules[module_id];
+TigBuilder::SignalSpec TigBuilder::get_signal_spec(ModuleId module_id, Signal signal) const {
+  const Module &module = design_.modules[module_id];
   const Node &node = module.nodes[signal.node_id];
   assert(signal.port_idx < node.outputs.size());
   return node.outputs[signal.port_idx];

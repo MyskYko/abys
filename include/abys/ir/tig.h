@@ -32,7 +32,7 @@ struct Tig {
       PortIndex port_idx = 0;
     };
 
-    enum class NodeKind {
+    enum class NodeKind : uint8_t {
       kInstance,
       kPi,
       kPo,
@@ -51,7 +51,7 @@ struct Tig {
       std::string name; // instance name
       ModuleId module_id = kInvalidModuleId;
       EdgeKind clk_edge = EdgeKind::kNone; // for ff
-      EdgeKind rst_edge = EdgeKind::kNone; // for ff with acync reset
+      EdgeKind rst_edge = EdgeKind::kNone; // for ff with async reset
       std::vector<EdgeRef> inputs;
       struct Output {
         std::string name;
@@ -64,7 +64,7 @@ struct Tig {
       ExprGraph expr_graph;
     };
 
-    enum class VariableKind { kUnknown, kWire, kReg, kLogic };
+    enum class VariableKind : uint8_t { kUnknown, kWire, kReg, kLogic };
 
     struct Variable {
       VariableKind kind = VariableKind::kUnknown;
@@ -84,11 +84,11 @@ struct Tig {
     struct PendingFf {
       std::string name;
       Node::Output clk_spec;
-      EdgeKind clk_edge;
+      EdgeKind clk_edge = EdgeKind::kNone;
       Node::Output rst_spec;
-      EdgeKind rst_edge;
-      NodeId node_id;
-      PortIndex port_idx;
+      EdgeKind rst_edge = EdgeKind::kNone;
+      NodeId node_id = kInvalidNodeId;
+      PortIndex port_idx = 0;
     };
 
     std::string name;
@@ -97,8 +97,8 @@ struct Tig {
     std::vector<Node> nodes;
     std::vector<Variable> variables;
     std::vector<UnpackedVariable> unpacked_variables;
-    std::unordered_map<std::string, EdgeRef> signal_map; // TOOD: move to builder?
-    std::vector<PendingFf> pending_ffs;                  // TOOD: move to builder?
+    std::unordered_map<std::string, EdgeRef> signal_map; // TODO: move to builder?
+    std::vector<PendingFf> pending_ffs;                  // TODO: move to builder?
   };
 
   struct Subroutine {
