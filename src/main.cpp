@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
   const std::string_view command = argv[1];
   if (command == "parse") {
     std::vector<std::string> files;
-    std::optional<std::string> top;
+    std::string top;
 
     for (int i = 2; i < argc; ++i) {
       const std::string_view arg = argv[i];
@@ -64,7 +64,8 @@ int main(int argc, char **argv) {
       files.emplace_back(arg);
     }
 
-    const auto result = abys::parse_systemverilog(files, top);
+    abys::Diagnostics diagnostics(std::cerr);
+    const auto result = abys::parse_systemverilog(files, top, diagnostics);
     if (!result.ok) {
       std::cerr << "parse failed: " << result.message << '\n';
       return 2;
@@ -76,7 +77,7 @@ int main(int argc, char **argv) {
 
   if (command == "emit") {
     std::vector<std::string> files;
-    std::optional<std::string> top;
+    std::string top;
     std::optional<std::string> out_path;
 
     for (int i = 2; i < argc; ++i) {
@@ -100,7 +101,8 @@ int main(int argc, char **argv) {
       files.emplace_back(arg);
     }
 
-    const auto result = abys::build_tig_from_systemverilog(files, top);
+    abys::Diagnostics diagnostics(std::cerr);
+    const auto result = abys::build_tig_from_systemverilog(files, top, diagnostics);
     if (!result.ok) {
       std::cerr << "emit failed: " << result.message << '\n';
       return 2;

@@ -10,10 +10,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
-#include <iostream>
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace abys::frontend {
@@ -75,8 +75,9 @@ bool is_synthesis_comment(std::string_view text) {
 
 class PragmaCollector final : public slang::syntax::SyntaxVisitor<PragmaCollector> {
 public:
-  PragmaCollector(const slang::SourceManager &source_manager, PragmaMap &pragmas)
-      : source_manager_(source_manager), pragmas_(pragmas) {}
+  PragmaCollector(const slang::SourceManager &source_manager, PragmaMap &pragmas,
+                  Diagnostics &diagnostics)
+      : source_manager_(source_manager), pragmas_(pragmas), diagnostics_(diagnostics) {}
 
   void handle(const slang::syntax::CaseStatementSyntax &syntax) {
     PragmaInfo info;
@@ -136,13 +137,14 @@ public:
   void handle(const slang::syntax::AttributeSpecSyntax &syntax) {
     if (handled_attributes_.find(&syntax) == handled_attributes_.end()) {
       const slang::SourceLocation loc = syntax.name.location();
-      std::cerr << "warning: unhandled synthesis attribute";
+      std::string detail;
       if (loc.valid()) {
-        std::cerr << " at " << source_manager_.getFileName(loc) << ":"
-                  << source_manager_.getLineNumber(loc) << ":"
-                  << source_manager_.getColumnNumber(loc);
+        detail = "at " + std::string(source_manager_.getFileName(loc)) + ":" +
+                 std::to_string(source_manager_.getLineNumber(loc)) + ":" +
+                 std::to_string(source_manager_.getColumnNumber(loc)) + ": ";
       }
-      std::cerr << ": " << syntax.name.valueText() << "\n";
+      detail += syntax.name.valueText();
+      diagnostics_.warning(DiagnosticId::kFrontendUnhandledSynthesisAttribute, std::move(detail));
     }
     visitDefault(syntax);
   }
@@ -162,29 +164,31 @@ public:
         continue;
       }
       const slang::SourceLocation loc = token.location();
-      std::cerr << "warning: unhandled synthesis comment";
+      std::string detail;
       if (loc.valid()) {
-        std::cerr << " at " << source_manager_.getFileName(loc) << ":"
-                  << source_manager_.getLineNumber(loc) << ":"
-                  << source_manager_.getColumnNumber(loc);
+        detail = "at " + std::string(source_manager_.getFileName(loc)) + ":" +
+                 std::to_string(source_manager_.getLineNumber(loc)) + ":" +
+                 std::to_string(source_manager_.getColumnNumber(loc)) + ": ";
       }
-      std::cerr << ": " << raw << "\n";
+      detail += raw;
+      diagnostics_.warning(DiagnosticId::kFrontendUnhandledSynthesisComment, std::move(detail));
     }
   }
 
 private:
   const slang::SourceManager &source_manager_;
   PragmaMap &pragmas_;
+  Diagnostics &diagnostics_;
   std::unordered_set<const char *> handled_comments_;
   std::unordered_set<const slang::syntax::AttributeSpecSyntax *> handled_attributes_;
 };
 
 } // namespace
 
-PragmaMap collect_pragmas(slang::driver::Driver &driver) {
+PragmaMap collect_pragmas(slang::driver::Driver &driver, Diagnostics &diagnostics) {
   PragmaMap pragmas;
   for (const auto &tree : driver.syntaxTrees) {
-    PragmaCollector collector(tree->sourceManager(), pragmas);
+    PragmaCollector collector(tree->sourceManager(), pragmas, diagnostics);
     tree->root().visit(collector);
   }
   return pragmas;

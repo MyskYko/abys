@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cctype>
-#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -40,6 +39,9 @@ namespace abys::frontend {
 using namespace abys::ir;
 
 struct SlangLoweringContext {
+  explicit SlangLoweringContext(Diagnostics &diagnostics) : diagnostics(diagnostics) {}
+
+  Diagnostics &diagnostics;
   std::unordered_map<const slang::ast::Symbol *, std::string> special_symbols;
   std::unordered_map<const slang::ast::SubroutineSymbol *, SubroutineId> subroutine_ids;
 

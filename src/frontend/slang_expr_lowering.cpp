@@ -110,8 +110,8 @@ public:
       case KnownSystemName::FEof:
       case KnownSystemName::TestPlusArgs:
       case KnownSystemName::ValuePlusArgs:
-        std::cerr << "warning: replacing non-synthesizable system function with zero: "
-                  << expr.getSubroutineName() << '\n';
+        context_.diagnostics.warning(DiagnosticId::kLoweringSystemFunctionReplacedWithZero,
+                                     std::string(expr.getSubroutineName()));
         expr_stack_.push_back(builder_.find_or_create_const(
             std::to_string(expr_width(expr)) + "'b0", expr_width(expr), expr_sign(expr)));
         return;

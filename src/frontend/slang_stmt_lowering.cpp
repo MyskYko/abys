@@ -85,8 +85,8 @@ public:
         case KnownSystemName::FOpen:
         case KnownSystemName::FClose:
         case KnownSystemName::FFlush:
-          std::cerr << "warning: ignoring non-synthesizable system call: "
-                    << call.getSubroutineName() << '\n';
+          context_.diagnostics.warning(DiagnosticId::kLoweringSystemCallIgnored,
+                                       std::string(call.getSubroutineName()));
           return;
         case KnownSystemName::ReadMemB:
         case KnownSystemName::ReadMemH:
@@ -184,7 +184,7 @@ public:
       full_case = it != pragmas_.by_node.end() && it->second.full_case;
     }
     if (full_case && stmt.defaultCase) {
-      std::cerr << "warning: ignoring full_case on case statement with default\n";
+      context_.diagnostics.warning(DiagnosticId::kLoweringFullCaseWithDefaultIgnored);
     }
     // TODO: propagate parallel_case
     builder_.merge_case(case_id, case_values, index, full_case && !stmt.defaultCase);

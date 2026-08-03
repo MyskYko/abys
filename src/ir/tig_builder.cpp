@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -11,9 +10,9 @@
 #include <vector>
 
 namespace abys::ir {
-TigBuilder::TigBuilder(Tig &design)
-    : design_(design), signal_maps_(design.modules.size()), pending_ffs_(design.modules.size()),
-      input_specs_(design.modules.size()) {}
+TigBuilder::TigBuilder(Tig &design, Diagnostics &diagnostics)
+    : design_(design), diagnostics_(diagnostics), signal_maps_(design.modules.size()),
+      pending_ffs_(design.modules.size()), input_specs_(design.modules.size()) {}
 
 void TigBuilder::set_top_module(std::string name) {
   design_.top_module_name = std::move(name);
@@ -191,7 +190,7 @@ PortIndex TigBuilder::add_node_output(ModuleId module_id, NodeId node_id, std::s
       Node &current_node = module.nodes[it->second.node_id];
       if (current_node.kind != NodeKind::kMerge) {
         if (current_node.kind == NodeKind::kOp) {
-          // TODO: handle multi-driver
+          // TODO: handle multiple drivers
           current_node.outputs[it->second.port_idx].name.clear();
         }
         NodeId merge_id = create_merge(module_id); // current_node may be invalidated here
@@ -231,7 +230,7 @@ ExprGraph &TigBuilder::get_expr_graph(ModuleId module_id, NodeId node_id) {
 }
 
 void TigBuilder::insert_ffs(ModuleId module_id) {
-  // TODO: check of multiple driver (e.g., overlapping)
+  // TODO: detect overlapping sequential drivers.
   auto same_ff_props = [](const PendingFf &a, const PendingFf &b) {
     if (a.clk_spec.name != b.clk_spec.name || a.clk_spec.width != b.clk_spec.width ||
         a.clk_spec.sign != b.clk_spec.sign || a.clk_edge != b.clk_edge) {
@@ -356,8 +355,8 @@ void TigBuilder::wire_connections(ModuleId module_id) {
         const auto &signal_map = signal_maps_[module_id];
         const auto it = signal_map.find(name);
         if (it == signal_map.end()) {
-          std::cerr << "warning: leaving unresolved signal input unconnected: " << module.name
-                    << "." << name << "\n"; // TODO: decide warning system
+          diagnostics_.warning(DiagnosticId::kLoweringUnresolvedSignalInput,
+                               module.name + "." + name);
           continue;
         }
         assert(it->second.node_id != kInvalidNodeId);

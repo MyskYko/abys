@@ -1,5 +1,4 @@
 #include <cassert>
-#include <iostream>
 #include <stdexcept>
 #include <utility>
 
@@ -7,7 +6,8 @@
 
 namespace abys::ir {
 
-StmtBuilder::StmtBuilder(ExprGraph &expr_graph) : expr_graph_(expr_graph) {
+StmtBuilder::StmtBuilder(ExprGraph &expr_graph, Diagnostics &diagnostics)
+    : expr_graph_(expr_graph), diagnostics_(diagnostics) {
   contexts_.emplace_back(Context({ExprBuilder(expr_graph), {}, {}, {}, {}, {}}));
 }
 
@@ -91,8 +91,7 @@ void StmtBuilder::add_timing(ExprId expr_id, ExprId iff_id, bool posedge, bool n
   }
   if (edge_kind == EdgeKind::kNone) {
     if (!is_comb_or_latch() && !is_undecided()) {
-      std::cerr << "warning: ignoring level-sensitive event in edge-sensitive procedural block"
-                << '\n';
+      diagnostics_.warning(DiagnosticId::kLoweringLevelSensitiveEventIgnored);
       return;
     }
     set_comb_or_latch();
@@ -143,8 +142,7 @@ std::vector<size_t> StmtBuilder::collect_last_output_indices(Context &ctx) const
         if (!is_ff()) {
           throw std::logic_error("Mixed blocking and nonblocking assignments to " + name);
         }
-        std::cerr << "warning: treating mixed blocking/nonblocking assignments as nonblocking for "
-                  << name << '\n';
+        diagnostics_.warning(DiagnosticId::kLoweringMixedAssignmentTreatedAsNonblocking, name);
         ctx.output_nonblocking[it->second] = true;
         ctx.output_nonblocking[i] = true;
       }
@@ -213,8 +211,7 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
         if (!is_ff()) {
           throw std::logic_error("Mixed blocking/nonblocking assignments to " + name);
         }
-        std::cerr << "warning: treating mixed blocking/nonblocking assignments as nonblocking for "
-                  << name << '\n';
+        diagnostics_.warning(DiagnosticId::kLoweringMixedAssignmentTreatedAsNonblocking, name);
         then_ctx.output_nonblocking[i] = true;
         else_ctx.output_nonblocking[it->second] = true;
       }
@@ -378,7 +375,7 @@ void StmtBuilder::get_timing_spec(const std::vector<std::pair<std::string, ExprI
     return;
   }
   for (int i = 0; i < 2; ++i) {
-    // TODO: check if rst is used only as an if-cond for debugging
+    // TODO: require the inferred reset signal to be used only as the reset condition.
     ExprId input_id;
     std::string name;
     SignalWidth width;

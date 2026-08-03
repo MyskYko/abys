@@ -1,6 +1,5 @@
 #include "abys/frontend/api.h"
 
-#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -9,7 +8,6 @@
 #include "abys/frontend/slang_lowering.h"
 #include "abys/frontend/slang_pragma.h"
 #include "abys/ir/tig.h"
-#include "abys/ir/tig_builder.h"
 
 #include "slang/driver/Driver.h"
 
@@ -26,8 +24,8 @@ void add_default_translate_off_formats(slang::driver::Driver &driver) {
 
 } // namespace
 
-ParseResult parse_systemverilog(const std::vector<std::string> &files,
-                                const std::optional<std::string> &top) {
+ParseResult parse_systemverilog(const std::vector<std::string> &files, std::string_view top,
+                                Diagnostics &diagnostics) {
   if (files.empty()) {
     return {false, "no input files provided"};
   }
@@ -40,8 +38,8 @@ ParseResult parse_systemverilog(const std::vector<std::string> &files,
     driver.sourceLoader.addFiles(file);
   }
 
-  if (top && !top->empty()) {
-    driver.options.topModules.push_back(*top);
+  if (!top.empty()) {
+    driver.options.topModules.push_back(std::string(top));
   }
 
   if (!driver.processOptions()) {
@@ -62,18 +60,17 @@ ParseResult parse_systemverilog(const std::vector<std::string> &files,
     return {false, "slang reported compilation errors"};
   }
 
-  (void)frontend::collect_pragmas(driver);
+  (void)frontend::collect_pragmas(driver, diagnostics);
 
   return {true, "ok"};
 }
 
-ir::TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &files,
-                                                const std::optional<std::string> &top) {
+TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &files,
+                                            std::string_view top, Diagnostics &diagnostics) {
   if (files.empty()) {
     return {false, "no input files provided", {}};
   }
 
-  ir::Tig design;
   slang::driver::Driver driver;
   driver.addStandardArgs();
   add_default_translate_off_formats(driver);
@@ -82,8 +79,8 @@ ir::TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &
     driver.sourceLoader.addFiles(file);
   }
 
-  if (top && !top->empty()) {
-    driver.options.topModules.push_back(*top);
+  if (!top.empty()) {
+    driver.options.topModules.push_back(std::string(top));
   }
 
   if (!driver.processOptions()) {
@@ -104,12 +101,9 @@ ir::TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &
     return {false, "slang reported compilation errors", {}};
   }
 
-  ir::TigBuilder builder(design);
-  if (top && !top->empty()) {
-    builder.set_top_module(*top);
-  }
-  frontend::PragmaMap pragmas = frontend::collect_pragmas(driver);
-  frontend::lower_slang_ast_to_ir(compilation->getRoot(), builder, pragmas);
+  frontend::PragmaMap pragmas = frontend::collect_pragmas(driver, diagnostics);
+  ir::Tig design =
+      frontend::lower_slang_ast_to_ir(compilation->getRoot(), diagnostics, pragmas, top);
 
   return {true, "ok", std::move(design)};
 }

@@ -51,8 +51,8 @@ private:
   }
 
 public:
-  explicit SlangLoweringVisitor(TigBuilder &builder, const PragmaMap &pragmas)
-      : builder_(builder), pragmas_(pragmas) {}
+  SlangLoweringVisitor(TigBuilder &builder, Diagnostics &diagnostics, const PragmaMap &pragmas)
+      : builder_(builder), pragmas_(pragmas), context_(diagnostics) {}
 
 private:
   std::string extract_output_named_value(const slang::ast::Expression &expr) {
@@ -154,8 +154,8 @@ public:
         const slang::ast::Expression *expr = conn->getExpression();
         if (port.direction == slang::ast::ArgumentDirection::In) {
           if (!expr) {
-            std::cerr << "warning: leaving unconnected input port: " << symbol.name << "."
-                      << port.name << "\n";
+            context_.diagnostics.warning(DiagnosticId::kLoweringUnconnectedInputPort,
+                                         std::string(symbol.name) + "." + std::string(port.name));
             builder_.add_node_input(module_id, node_id, TigBuilder::kInvalidNodeId);
             // TODO: think of a better way of handling this
             continue;
@@ -373,13 +373,14 @@ public:
   void handle(const slang::ast::ProceduralBlockSymbol &symbol) {
     if (symbol.procedureKind == slang::ast::ProceduralBlockKind::Initial ||
         symbol.procedureKind == slang::ast::ProceduralBlockKind::Final) {
-      std::cerr << "warning: ignoring procedural block: "
-                << slang::ast::SemanticFacts::getProcedureKindStr(symbol.procedureKind) << '\n';
+      context_.diagnostics.warning(
+          DiagnosticId::kLoweringProceduralBlockIgnored,
+          std::string(slang::ast::SemanticFacts::getProcedureKindStr(symbol.procedureKind)));
       return;
     }
     const ModuleId module_id = current_module_id();
     const NodeId node_id = builder_.create_operation(module_id);
-    StmtBuilder stmt_builder(builder_.get_expr_graph(module_id, node_id));
+    StmtBuilder stmt_builder(builder_.get_expr_graph(module_id, node_id), context_.diagnostics);
     switch (symbol.procedureKind) {
     case slang::ast::ProceduralBlockKind::AlwaysComb:
       stmt_builder.set_comb();
@@ -427,7 +428,7 @@ public:
 
   void handle(const slang::ast::SubroutineSymbol &symbol) {
     if (symbol.subroutineKind != slang::ast::SubroutineKind::Function) {
-      std::cerr << "warning: ignoring task in synthesis lowering: " << symbol.name << "\n";
+      context_.diagnostics.warning(DiagnosticId::kLoweringTaskIgnored, std::string(symbol.name));
       return;
     }
     // TODO: it is better to remove dependency on tig structure; use builder api to create a
@@ -444,7 +445,7 @@ public:
       subr.inputs.emplace_back(
           Tig::Subroutine::Port{std::string(arg->name), type.getBitstreamWidth(), type.isSigned()});
     }
-    StmtBuilder stmt_builder(subr.expr_graph);
+    StmtBuilder stmt_builder(subr.expr_graph, context_.diagnostics);
     const auto &return_type = symbol.getReturnType();
     const SignalWidth return_width = return_type.getBitstreamWidth();
     const std::string return_unknown(return_width, 'x');
@@ -498,16 +499,17 @@ public:
   void handle(const slang::ast::TransparentMemberSymbol &symbol) { this->visitDefault(symbol); }
 };
 
-void lower_slang_ast_to_ir(const slang::ast::RootSymbol &root, TigBuilder &builder,
-                           const PragmaMap &pragmas) {
-  SlangLoweringVisitor visitor(builder, pragmas);
+Tig lower_slang_ast_to_ir(const slang::ast::RootSymbol &root, Diagnostics &diagnostics,
+                          const PragmaMap &pragmas, std::string_view top) {
+  Tig design;
+  TigBuilder builder(design, diagnostics);
+  if (!top.empty()) {
+    builder.set_top_module(std::string(top));
+  }
+  SlangLoweringVisitor visitor(builder, diagnostics, pragmas);
   root.visit(visitor);
   builder.flatten_calls();
-}
-
-void lower_slang_ast_to_ir(const slang::ast::RootSymbol &root, TigBuilder &builder) {
-  const PragmaMap pragmas;
-  lower_slang_ast_to_ir(root, builder, pragmas);
+  return design;
 }
 
 } // namespace abys::frontend

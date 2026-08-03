@@ -6,19 +6,15 @@
 #include <unordered_map>
 #include <vector>
 
+#include "abys/diagnostics.h"
 #include "abys/ir/tig.h"
 
 namespace abys::ir {
 
-struct TigBuildResult {
-  bool ok = false;
-  std::string message;
-  Tig design;
-};
-
 class TigBuilder {
 private:
   Tig &design_;
+  Diagnostics &diagnostics_;
 
 public:
   using NodeId = Tig::NodeId;
@@ -52,7 +48,7 @@ private:
   void add_input_spec(ModuleId module_id, NodeId node_id, SignalSpec input_spec);
 
 public:
-  explicit TigBuilder(Tig &design);
+  TigBuilder(Tig &design, Diagnostics &diagnostics);
   void set_top_module(std::string name);
   std::string generate_temporary_name();
   std::string create_temporary_signal(ModuleId module_id, SignalWidth width, bool sign,

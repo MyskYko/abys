@@ -4,6 +4,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "abys/diagnostics.h"
 #include "slang/driver/Driver.h"
 #include "slang/syntax/SyntaxNode.h"
 
@@ -24,6 +25,6 @@ struct PragmaMap {
   std::unordered_map<const slang::syntax::SyntaxNode *, PragmaInfo> by_node;
 };
 
-PragmaMap collect_pragmas(slang::driver::Driver &driver);
+PragmaMap collect_pragmas(slang::driver::Driver &driver, Diagnostics &diagnostics);
 
 } // namespace abys::frontend

@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "abys/diagnostics.h"
 #include "abys/ir/expr_builder.h"
 #include "abys/ir/tig.h"
 
@@ -13,7 +14,7 @@ namespace abys::ir {
 
 class StmtBuilder {
 public:
-  explicit StmtBuilder(ExprGraph &expr_graph);
+  StmtBuilder(ExprGraph &expr_graph, Diagnostics &diagnostics);
 
   ExprBuilder &get_expr_builder();
   void add_output(std::string name, bool nonblocking, ExprId id);
@@ -86,6 +87,7 @@ public:
 
 private:
   ExprGraph &expr_graph_;
+  Diagnostics &diagnostics_;
 
   enum class Policy : uint8_t { Comb, Latch, CombOrLatch, Ff, Undecided };
 
