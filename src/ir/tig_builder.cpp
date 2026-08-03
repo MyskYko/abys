@@ -11,7 +11,6 @@
 #include <vector>
 
 namespace abys::ir {
-
 TigBuilder::TigBuilder(Tig &design)
     : design_(design), signal_maps_(design.modules.size()), pending_ffs_(design.modules.size()),
       input_specs_(design.modules.size()) {}
@@ -24,9 +23,10 @@ std::string TigBuilder::generate_temporary_name() {
   return std::string("abys_temporary_") + std::to_string(design_.temporary_name_count++);
 }
 
-std::string TigBuilder::create_temporary_signal(ModuleId module_id, SignalWidth width, bool sign) {
+std::string TigBuilder::create_temporary_signal(ModuleId module_id, SignalWidth width, bool sign,
+                                                std::vector<SignalWidth> unpacked_dims) {
   std::string name = generate_temporary_name();
-  create_variable(module_id, name, width, sign, true, false);
+  create_signal(module_id, name, width, sign, std::move(unpacked_dims));
   return name;
 }
 
@@ -71,57 +71,41 @@ TigBuilder::ModuleId TigBuilder::create_module(std::string name) {
 }
 
 TigBuilder::NodeId TigBuilder::create_module_input(ModuleId module_id, std::string name,
-                                                   SignalWidth width, bool sign) {
+                                                   SignalWidth width, bool sign,
+                                                   std::vector<SignalWidth> unpacked_dims) {
   Module &module = design_.modules[module_id];
-  module.input_ports.push_back({name, width, sign});
+  const SignalWidth interface_width = unpacked_dims.empty() ? width : unpacked_dims.front();
+  const bool interface_sign = unpacked_dims.empty() ? sign : false;
+  module.input_ports.push_back({name, std::move(unpacked_dims), width, sign});
   NodeId node_id = create_node(module_id, NodeKind::kPi);
   Node &node = module.nodes[node_id];
-  node.outputs.push_back({name, width, sign});
+  node.outputs.push_back({name, interface_width, interface_sign});
   add_signal(module_id, std::move(name), {node_id, 0});
   return node_id;
 }
 
 TigBuilder::NodeId TigBuilder::create_module_output(ModuleId module_id, std::string name,
                                                     SignalWidth width, bool sign,
-                                                    std::string input_name, SignalWidth input_width,
-                                                    bool input_sign, NodeId input_id,
-                                                    PortIndex port_idx) {
+                                                    std::string input_name, NodeId input_id,
+                                                    PortIndex port_idx,
+                                                    std::vector<SignalWidth> unpacked_dims) {
   Module &module = design_.modules[module_id];
-  module.output_ports.push_back({std::move(name), width, sign});
+  const SignalWidth interface_width = unpacked_dims.empty() ? width : unpacked_dims.front();
+  const bool interface_sign = unpacked_dims.empty() ? sign : false;
+  module.output_ports.push_back({std::move(name), std::move(unpacked_dims), width, sign});
   NodeId node_id = create_node(module_id, NodeKind::kPo);
   Node &node = module.nodes[node_id];
   if (!input_name.empty()) {
-    add_input_spec(module_id, node_id, {std::move(input_name), input_width, input_sign});
+    add_input_spec(module_id, node_id, {std::move(input_name), interface_width, interface_sign});
   }
   node.inputs.push_back({input_id, port_idx});
   return node_id;
 }
 
-void TigBuilder::create_variable(ModuleId module_id, std::string name, SignalWidth width, bool sign,
-                                 bool wire, bool reg) {
+void TigBuilder::create_signal(ModuleId module_id, std::string name, SignalWidth width, bool sign,
+                               std::vector<SignalWidth> unpacked_dims) {
   Module &module = design_.modules[module_id];
-  Module::VariableKind kind = Module::VariableKind::kLogic;
-  assert(!wire || !reg);
-  if (wire) {
-    kind = Module::VariableKind::kWire;
-  } else if (reg) {
-    kind = Module::VariableKind::kReg;
-  }
-  module.variables.push_back({kind, std::move(name), width, sign});
-}
-
-void TigBuilder::create_unpacked_variable(ModuleId module_id, std::string name,
-                                          std::vector<SignalWidth> dims, SignalWidth width,
-                                          bool sign, bool wire, bool reg) {
-  Module &module = design_.modules[module_id];
-  Module::VariableKind kind = Module::VariableKind::kLogic;
-  assert(!wire || !reg);
-  if (wire) {
-    kind = Module::VariableKind::kWire;
-  } else if (reg) {
-    kind = Module::VariableKind::kReg;
-  }
-  module.unpacked_variables.push_back({kind, std::move(name), std::move(dims), width, sign});
+  module.signals.push_back({std::move(name), std::move(unpacked_dims), width, sign});
 }
 
 TigBuilder::NodeId TigBuilder::create_instance(ModuleId module_id, std::string name,

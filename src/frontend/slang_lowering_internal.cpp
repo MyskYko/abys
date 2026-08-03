@@ -119,4 +119,20 @@ void get_width_sign(const slang::ast::Type &type, SignalWidth &width, bool &sign
   }
 }
 
+SignalType get_signal_type(const slang::ast::Type &type) {
+  SignalType signal_type;
+  const slang::ast::Type *element_type = &type.getCanonicalType();
+  while (element_type->kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+    const auto &array_type = element_type->as<slang::ast::FixedSizeUnpackedArrayType>();
+    signal_type.unpacked_dims.push_back(array_type.range.width());
+    element_type = &array_type.elementType.getCanonicalType();
+  }
+  if (element_type->isUnpackedArray()) {
+    throw std::logic_error("Unsupported dynamic size unpacked array");
+  }
+  signal_type.width = element_type->getBitstreamWidth();
+  signal_type.sign = element_type->isSigned();
+  return signal_type;
+}
+
 } // namespace abys::frontend

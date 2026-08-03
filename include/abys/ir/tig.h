@@ -19,8 +19,9 @@ struct Tig {
 
   struct Module {
 
-    struct Port {
+    struct SignalProperties {
       std::string name;
+      std::vector<SignalWidth> unpacked_dims;
       SignalWidth width = 0;
       bool sign = false;
     };
@@ -62,29 +63,11 @@ struct Tig {
       ExprGraph expr_graph;
     };
 
-    enum class VariableKind : uint8_t { kUnknown, kWire, kReg, kLogic };
-
-    struct Variable {
-      VariableKind kind = VariableKind::kUnknown;
-      std::string name;
-      SignalWidth width = 0;
-      bool sign = false;
-    };
-
-    struct UnpackedVariable {
-      VariableKind kind = VariableKind::kUnknown;
-      std::string name;
-      std::vector<SignalWidth> dims;
-      SignalWidth width = 0;
-      bool sign = false;
-    };
-
     std::string name;
-    std::vector<Port> input_ports;
-    std::vector<Port> output_ports;
+    std::vector<SignalProperties> input_ports;
+    std::vector<SignalProperties> output_ports;
     std::vector<Node> nodes;
-    std::vector<Variable> variables;
-    std::vector<UnpackedVariable> unpacked_variables;
+    std::vector<SignalProperties> signals;
   };
 
   struct Subroutine {

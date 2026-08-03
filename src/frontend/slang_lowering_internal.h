@@ -46,6 +46,12 @@ struct SlangLoweringContext {
   SubroutineId get_or_create_subroutine_id(const slang::ast::SubroutineSymbol &symbol);
 };
 
+struct SignalType {
+  std::vector<SignalWidth> unpacked_dims;
+  SignalWidth width = 0;
+  bool sign = false;
+};
+
 const char *definition_kind_to_string(slang::ast::DefinitionKind kind);
 SignalWidth expr_width(const slang::ast::Expression &expr);
 bool expr_sign(const slang::ast::Expression &expr);
@@ -62,6 +68,7 @@ extract_named_value(const slang::ast::Expression &expr,
                     std::unordered_map<const slang::ast::Symbol *, std::string> &special_symbols);
 BitIndex extract_constant_index(const slang::ast::Expression &expr);
 void get_width_sign(const slang::ast::Type &type, SignalWidth &width, bool &sign);
+SignalType get_signal_type(const slang::ast::Type &type);
 
 ExprId build_expr(const slang::ast::Expression &expr, ExprBuilder &expr_builder,
                   SlangLoweringContext &context, ExprId compound_lhs_id = kInvalidExprId);

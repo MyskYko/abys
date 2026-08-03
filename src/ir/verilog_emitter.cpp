@@ -47,6 +47,9 @@ void VerilogEmitter::emit_module_header(const Module &module, std::ostream &os) 
       os << "[" << (input.width - 1) << ":0] ";
     }
     os << input.name;
+    for (SignalWidth dim : input.unpacked_dims) {
+      os << " [" << (dim - 1) << ":0]";
+    }
   }
   for (const auto &output : module.output_ports) {
     if (!first) {
@@ -63,6 +66,9 @@ void VerilogEmitter::emit_module_header(const Module &module, std::ostream &os) 
       os << "[" << (output.width - 1) << ":0] ";
     }
     os << output.name;
+    for (SignalWidth dim : output.unpacked_dims) {
+      os << " [" << (dim - 1) << ":0]";
+    }
   }
   os << ");\n\n";
 }
@@ -75,33 +81,11 @@ void VerilogEmitter::emit_signal_decls(const Module &module, std::ostream &os) {
   for (const auto &p : module.output_ports) {
     port_names.insert(p.name);
   }
-  for (const auto &var : module.variables) {
+  for (const auto &var : module.signals) {
     if (port_names.contains(var.name)) {
       continue;
     }
     os << "  ";
-    // TODO: we are putting everything into always for now
-    // if (var.kind == Module::VariableKind::kWire) {
-    //   os << "wire ";
-    // }
-    os << "logic ";
-    if (var.sign) {
-      os << "signed ";
-    }
-    if (var.width > 1) {
-      os << "[" << (var.width - 1) << ":0] ";
-    }
-    os << var.name << ";\n";
-  }
-  for (const auto &var : module.unpacked_variables) {
-    if (port_names.contains(var.name)) {
-      continue;
-    }
-    os << "  ";
-    // TODO: we are putting everything into always for now
-    // if (var.kind == Module::VariableKind::kWire) {
-    //   os << "wire ";
-    // }
     os << "logic ";
     if (var.sign) {
       os << "signed ";
@@ -110,7 +94,7 @@ void VerilogEmitter::emit_signal_decls(const Module &module, std::ostream &os) {
       os << "[" << (var.width - 1) << ":0] ";
     }
     os << var.name;
-    for (SignalWidth width : var.dims) {
+    for (SignalWidth width : var.unpacked_dims) {
       os << " [" << (width - 1) << ":0]";
     }
     os << ";\n";

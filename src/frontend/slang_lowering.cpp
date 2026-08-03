@@ -41,45 +41,12 @@ private:
     return node_id;
   }
 
-  std::string create_variable(const slang::ast::ValueSymbol &symbol, bool net) {
+  std::string create_signal(const slang::ast::ValueSymbol &symbol) {
     const auto &type = symbol.getType().getCanonicalType();
-    std::string name;
-    if (type.isUnpackedArray()) {
-      std::vector<SignalWidth> dims;
-      const slang::ast::Type *t = &type;
-      while (t->kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
-        const auto &arr = t->as<slang::ast::FixedSizeUnpackedArrayType>();
-        const auto range = arr.range;
-        const BitIndex width = (range.left >= range.right) ? (range.left - range.right + 1)
-                                                           : (range.right - range.left + 1);
-        assert(width >= 0);
-        dims.push_back(width);
-        t = &arr.elementType.getCanonicalType();
-      }
-      const auto &elem = *t;
-      const SignalWidth width = elem.getBitstreamWidth();
-      const bool sign = elem.isSigned();
-      bool reg = false;
-      if (!net) {
-        if (slang::ast::IntegralType::isKind(elem.kind)) {
-          reg = elem.as<slang::ast::IntegralType>().isDeclaredReg();
-        }
-      }
-      name = register_symbol_name(symbol, context_.special_symbols, suffix_);
-      builder_.create_unpacked_variable(current_module_id(), name, std::move(dims), width, sign,
-                                        net, reg);
-    } else {
-      const SignalWidth width = type.getBitstreamWidth();
-      const bool sign = type.isSigned();
-      bool reg = false;
-      if (!net) {
-        if (slang::ast::IntegralType::isKind(type.kind)) {
-          reg = type.as<slang::ast::IntegralType>().isDeclaredReg();
-        }
-      }
-      name = register_symbol_name(symbol, context_.special_symbols, suffix_);
-      builder_.create_variable(current_module_id(), name, width, sign, net, reg);
-    }
+    SignalType signal_type = get_signal_type(type);
+    std::string name = register_symbol_name(symbol, context_.special_symbols, suffix_);
+    builder_.create_signal(current_module_id(), name, signal_type.width, signal_type.sign,
+                           std::move(signal_type.unpacked_dims));
     return name;
   }
 
@@ -94,12 +61,6 @@ private:
     assert(assign.right().kind == slang::ast::ExpressionKind::EmptyArgument);
     return extract_named_value(assign.left(), context_.special_symbols);
   }
-
-  abys::ir::SignalWidth port_width(const slang::ast::PortSymbol &port) {
-    return port.getType().getBitstreamWidth();
-  }
-
-  bool port_sign(const slang::ast::PortSymbol &port) { return port.getType().isSigned(); }
 
 public:
   template <typename T> void handle(const T &) {
@@ -124,15 +85,16 @@ public:
     if (symbol.direction == slang::ast::ArgumentDirection::Ref) {
       throw std::logic_error("Ref ports are not supported");
     }
-    // TODO: handle unpacked
+    const SignalType signal_type = get_signal_type(symbol.getType());
     if (symbol.direction == slang::ast::ArgumentDirection::In) {
-      NodeId node_id = builder_.create_module_input(current_module_id(), std::string(symbol.name),
-                                                    port_width(symbol), port_sign(symbol));
+      NodeId node_id = builder_.create_module_input(
+          current_module_id(), std::string(symbol.name), signal_type.width, signal_type.sign,
+          signal_type.unpacked_dims);
       (void)node_id;
     } else if (symbol.direction == slang::ast::ArgumentDirection::Out) {
       NodeId node_id = builder_.create_module_output(
-          current_module_id(), std::string(symbol.name), port_width(symbol), port_sign(symbol),
-          std::string(symbol.name), port_width(symbol), port_sign(symbol));
+          current_module_id(), std::string(symbol.name), signal_type.width, signal_type.sign,
+          std::string(symbol.name), TigBuilder::kInvalidNodeId, 0, signal_type.unpacked_dims);
       (void)node_id;
     } else {
       throw std::logic_error("Unknown port direction");
@@ -202,14 +164,19 @@ public:
             const NodeId input_id = create_expr_node(*expr);
             builder_.add_node_input(module_id, node_id, input_id);
           } else {
-            // TODO: handle unpacked
-            builder_.add_node_input_spec(module_id, node_id,
-                                         extract_named_value(*expr, context_.special_symbols),
-                                         expr_width(*expr), expr_sign(*expr));
+            SignalWidth width;
+            bool sign;
+            get_width_sign(*expr->type, width, sign);
+            builder_.add_node_input_spec(
+                module_id, node_id, extract_named_value(*expr, context_.special_symbols),
+                width, sign);
           }
         } else if (port.direction == slang::ast::ArgumentDirection::Out) {
           if (!expr) {
-            builder_.add_node_output(module_id, node_id, "", 0, false);
+            SignalWidth width;
+            bool sign;
+            get_width_sign(port.getType(), width, sign);
+            builder_.add_node_output(module_id, node_id, "", width, sign);
             continue;
           }
           if (expr->kind != slang::ast::ExpressionKind::Assignment) {
@@ -217,8 +184,9 @@ public:
           }
           const auto &assign = expr->as<slang::ast::AssignmentExpression>();
           const auto &lhs = assign.left();
-          SignalWidth rhs_width = port_width(port); // TODO: handle unpacked array
-          bool rhs_sign = port_sign(port);
+          SignalWidth rhs_width;
+          bool rhs_sign;
+          get_width_sign(port.getType(), rhs_width, rhs_sign);
           NodeId output_node_id = node_id;
           ExprId output_expr_id = kInvalidExprId;
           if (assign.right().kind != slang::ast::ExpressionKind::EmptyArgument) {
@@ -250,8 +218,9 @@ public:
                                             true);
             }
           } else {
-            const std::string temporary_name =
-                builder_.create_temporary_signal(module_id, rhs_width, rhs_sign);
+            const SignalType signal_type = get_signal_type(port.getType());
+            const std::string temporary_name = builder_.create_temporary_signal(
+                module_id, signal_type.width, signal_type.sign, signal_type.unpacked_dims);
             PortIndex port_idx;
             if (output_expr_id == kInvalidExprId) {
               port_idx = builder_.add_node_output(module_id, output_node_id, temporary_name,
@@ -380,10 +349,10 @@ public:
     this->visitDefault(symbol);
   }
 
-  void handle(const slang::ast::VariableSymbol &symbol) { create_variable(symbol, false); }
+  void handle(const slang::ast::VariableSymbol &symbol) { create_signal(symbol); }
 
   void handle(const slang::ast::NetSymbol &symbol) {
-    const std::string variable_name = create_variable(symbol, true);
+    const std::string variable_name = create_signal(symbol);
     const auto *init = symbol.getInitializer();
     if (!init) {
       return;
