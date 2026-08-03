@@ -2,7 +2,6 @@
 #include <bitset>
 #include <cassert>
 #include <cmath>
-#include <cstdlib>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -246,55 +245,6 @@ ExprId ExprBuilder::create_shr(ExprId data, ExprId shamt) {
 }
 ExprId ExprBuilder::create_ashr(ExprId data, ExprId shamt) {
   return create_shift(ExprGraph::Op::kAshr, data, shamt);
-}
-
-ExprId ExprBuilder::create_preinc(ExprId operand) {
-  abort(); // TODO: this block is untested
-  std::string name;
-  bool found = false;
-  for (const auto &kv : name_map_) {
-    if (kv.second == operand) {
-      name = kv.first;
-      found = true;
-      break;
-    }
-  }
-  if (!found) {
-    throw std::logic_error("preincrement requires current mapped lvalue");
-  }
-  // TODO: not sure about bitwidth and signedness
-  const ExprId next = create_add(operand, get_constant_one());
-  ExprId updated = next;
-  ExprId cursor = operand;
-  while (true) {
-    const auto &node = get_node(cursor);
-    if (node.op == ExprGraph::Op::kUnpackedSelect) {
-      ExprId base = node.operands[0];
-      ExprId index = node.operands[1];
-      const auto &base_node = get_node(base);
-      updated = create_masked_assign(base, updated, index, 1, base_node.width, base_node.sign);
-      cursor = base;
-      continue;
-    }
-    if (node.op == ExprGraph::Op::kRange) {
-      ExprId base = node.operands[0];
-      ExprId pos = node.operands[1];
-      const auto &base_node = get_node(base);
-      updated =
-          create_masked_assign(base, updated, pos, node.width, base_node.width, base_node.sign);
-      cursor = base;
-      continue;
-    }
-    if (node.op == ExprGraph::Op::kReverse) {
-      assert(node.operands.size() == 1);
-      updated = create_reverse(updated);
-      cursor = node.operands[0];
-      continue;
-    }
-    break;
-  }
-  update_value(name, updated);
-  return next;
 }
 
 ExprId ExprBuilder::create_compare(ExprGraph::Op op, ExprId a, ExprId b) {

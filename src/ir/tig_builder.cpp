@@ -369,7 +369,6 @@ void TigBuilder::wire_connections(ModuleId module_id) {
         Signal input =
             get_node_input(module_id, static_cast<NodeId>(node_id), static_cast<PortIndex>(i));
         if (input.node_id == kInvalidNodeId) {
-          // TODO: unassigned inputs is currently handled here
           continue;
         }
       }

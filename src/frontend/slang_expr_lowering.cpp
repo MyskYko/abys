@@ -455,8 +455,6 @@ public:
       id = builder_.create_logical_not(id);
       break;
     case slang::ast::UnaryOperator::Preincrement:
-      id = builder_.create_preinc(a);
-      break;
     case slang::ast::UnaryOperator::Predecrement:
     case slang::ast::UnaryOperator::Postincrement:
     case slang::ast::UnaryOperator::Postdecrement:

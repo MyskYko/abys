@@ -117,7 +117,6 @@ public:
 
     module_stack_.push_back(module_id);
     this->visitDefault(symbol);
-    // TODO: sanitize multiple assignment on packed/unpacked variables
     builder_.insert_ffs(module_id);
     builder_.wire_connections(module_id);
     module_stack_.pop_back();
@@ -157,7 +156,6 @@ public:
             context_.diagnostics.warning(DiagnosticId::kLoweringUnconnectedInputPort,
                                          std::string(symbol.name) + "." + std::string(port.name));
             builder_.add_node_input(module_id, node_id, TigBuilder::kInvalidNodeId);
-            // TODO: think of a better way of handling this
             continue;
           }
           if (expr->kind != slang::ast::ExpressionKind::NamedValue) {
@@ -401,7 +399,6 @@ public:
     stmt_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
       builder_.add_node_input_spec(module_id, node_id, name, width, sign);
     });
-    // TODO: skip integers to be assigned (what else should we skip?)
     if (!stmt_builder.is_ff()) {
       // TODO: latch inference is deferred
       stmt_builder.for_each_output([&](const std::string &name, ExprId expr_id) {
