@@ -2,9 +2,9 @@
 
 #include <string_view>
 
-#include "abys/diagnostics.h"
+#include "abys/infra/diagnostics.h"
+#include "abys/infra/naming.h"
 #include "abys/ir/tig.h"
-#include "abys/naming.h"
 
 namespace slang::ast {
 class RootSymbol;

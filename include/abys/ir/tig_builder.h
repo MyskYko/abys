@@ -6,9 +6,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "abys/diagnostics.h"
+#include "abys/infra/diagnostics.h"
+#include "abys/infra/naming.h"
 #include "abys/ir/tig.h"
-#include "abys/naming.h"
 
 namespace abys::ir {
 

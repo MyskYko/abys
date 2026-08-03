@@ -4,7 +4,7 @@
 #include <string_view>
 #include <unordered_map>
 
-#include "abys/diagnostics.h"
+#include "abys/infra/diagnostics.h"
 #include "slang/driver/Driver.h"
 #include "slang/syntax/SyntaxNode.h"
 

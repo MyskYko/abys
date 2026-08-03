@@ -6,7 +6,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "abys/diagnostics.h"
+#include "abys/infra/diagnostics.h"
 #include "abys/ir/expr_builder.h"
 #include "abys/ir/tig.h"
 

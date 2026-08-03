@@ -20,7 +20,7 @@ if(ABYS_ENABLE_COVERAGE)
 endif()
 
 set(ABYS_CORE_SOURCES
-  src/diagnostics.cpp
+  src/infra/diagnostics.cpp
   src/version.cpp
   src/frontend/slang.cpp
   src/frontend/slang_expr_lowering.cpp

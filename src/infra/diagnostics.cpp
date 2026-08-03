@@ -1,4 +1,4 @@
-#include "abys/diagnostics.h"
+#include "abys/infra/diagnostics.h"
 
 #include <ostream>
 #include <stdexcept>
