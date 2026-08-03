@@ -21,7 +21,6 @@ private:
 
   std::string suffix_;
   SlangLoweringContext context_;
-  // TODO: think about unordered_map size
 
   ModuleId current_module_id() const {
     if (module_stack_.empty()) {
@@ -82,7 +81,6 @@ private:
       builder_.create_variable(current_module_id(), name, width, sign, net, reg);
     }
     return name;
-    // TODO: implement debugging (mismatch, unused, or nondeclared)
   }
 
 public:
@@ -112,12 +110,10 @@ public:
 
   void handle(const slang::ast::DefParamSymbol &) {}
 
-  void handle(const slang::ast::GenvarSymbol &) {
-    // TODO: I think it's fine to ignore and cleanup unused signal later
-  }
+  void handle(const slang::ast::GenvarSymbol &) {}
 
   void handle(const slang::ast::ParameterSymbol &) {
-    // TODO: parameters should be saved per module variant for easier debugging
+    // TODO: preserve elaborated parameter names and values as module-variant metadata.
   }
 
   void handle(const slang::ast::PortSymbol &symbol) {

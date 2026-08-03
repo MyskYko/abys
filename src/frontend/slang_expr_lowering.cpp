@@ -7,6 +7,7 @@ class SlangExprLoweringVisitor final
 private:
   ExprBuilder &builder_;
   SlangLoweringContext &context_;
+  ExprId compound_lhs_id_;
   std::vector<ExprId> expr_stack_;
 
   bool try_lower_integer_constant(const slang::ast::Expression &expr) {
@@ -20,11 +21,19 @@ private:
   }
 
 public:
-  explicit SlangExprLoweringVisitor(ExprBuilder &builder, SlangLoweringContext &context)
-      : builder_(builder), context_(context) {}
+  explicit SlangExprLoweringVisitor(ExprBuilder &builder, SlangLoweringContext &context,
+                                    ExprId compound_lhs_id)
+      : builder_(builder), context_(context), compound_lhs_id_(compound_lhs_id) {}
 
   template <typename T> void handle(const T &) {
     throw std::logic_error(std::string("Unhandled AST node: ") + typeid(T).name());
+  }
+
+  void handle(const slang::ast::LValueReferenceExpression &) {
+    if (compound_lhs_id_ == kInvalidExprId) {
+      throw std::logic_error("Lvalue reference outside compound assignment");
+    }
+    expr_stack_.push_back(compound_lhs_id_);
   }
 
   void handle(const slang::ast::ConversionExpression &expr) {
@@ -469,8 +478,6 @@ public:
     expr_stack_.push_back(builder_.create_gather(std::move(operands)));
   }
 
-  // TODO: handle compound assignment here
-
   ExprId get_root() {
     assert(!expr_stack_.empty());
     assert(expr_stack_.size() == 1);
@@ -479,8 +486,8 @@ public:
 };
 
 ExprId build_expr(const slang::ast::Expression &expr, ExprBuilder &expr_builder,
-                  SlangLoweringContext &context) {
-  SlangExprLoweringVisitor expr_visitor(expr_builder, context);
+                  SlangLoweringContext &context, ExprId compound_lhs_id) {
+  SlangExprLoweringVisitor expr_visitor(expr_builder, context, compound_lhs_id);
   expr.visit(expr_visitor);
   return expr_visitor.get_root();
 }

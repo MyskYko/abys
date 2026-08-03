@@ -64,7 +64,7 @@ BitIndex extract_constant_index(const slang::ast::Expression &expr);
 void get_width_sign(const slang::ast::Type &type, SignalWidth &width, bool &sign);
 
 ExprId build_expr(const slang::ast::Expression &expr, ExprBuilder &expr_builder,
-                  SlangLoweringContext &context);
+                  SlangLoweringContext &context, ExprId compound_lhs_id = kInvalidExprId);
 
 void lower_statement(const slang::ast::Statement &statement, StmtBuilder &builder,
                      SlangLoweringContext &context, const PragmaMap &pragmas);

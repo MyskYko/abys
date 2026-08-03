@@ -9,6 +9,14 @@ private:
   SlangLoweringContext &context_;
   const PragmaMap &pragmas_;
 
+  ExprId build_assignment(const slang::ast::AssignmentExpression &assignment) {
+    ExprId compound_lhs_id = kInvalidExprId;
+    if (assignment.isCompound()) {
+      compound_lhs_id = build_expr(assignment.left(), builder_.get_expr_builder(), context_);
+    }
+    return build_expr(assignment.right(), builder_.get_expr_builder(), context_, compound_lhs_id);
+  }
+
 public:
   explicit SlangStmtLoweringVisitor(StmtBuilder &builder, SlangLoweringContext &context,
                                     const PragmaMap &pragmas)
@@ -94,8 +102,7 @@ public:
       throw std::logic_error("Non-assignment expression statement is unsupported");
     }
     const auto &assign = stmt.expr.as<slang::ast::AssignmentExpression>();
-    assert(!assign.isCompound()); // TODO: we need to handle this later
-    ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), context_);
+    ExprId rhs_id = build_assignment(assign);
     const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
     const bool nonblocking = assign.isNonBlocking();
     std::unordered_map<std::string, ExprId> to_restore;
@@ -205,11 +212,8 @@ public:
         throw std::logic_error("unsupported for-loop initializer");
       }
       const auto &assign = init->as<slang::ast::AssignmentExpression>();
-      if (assign.isCompound()) {
-        throw std::logic_error("compound for-loop initializer is unsupported");
-      }
       assert(!assign.isNonBlocking());
-      ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), context_);
+      ExprId rhs_id = build_assignment(assign);
       const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
       lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(), context_,
                            &builder_.scheduled_assignments(),
@@ -238,11 +242,8 @@ public:
           throw std::logic_error("unsupported for-loop step");
         }
         const auto &assign = step->as<slang::ast::AssignmentExpression>();
-        if (assign.isCompound()) {
-          throw std::logic_error("compound is unsupported");
-        }
         assert(!assign.isNonBlocking());
-        ExprId rhs_id = build_expr(assign.right(), builder_.get_expr_builder(), context_);
+        ExprId rhs_id = build_assignment(assign);
         const SignalWidth rhs_width = builder_.get_expr_builder().get_width(rhs_id);
         const bool rhs_sign = builder_.get_expr_builder().get_sign(rhs_id);
         const int rhs_value =
