@@ -223,10 +223,13 @@ public:
                              builder_.add_output(output_name, false, expr_id);
                            });
     }
+    // TODO: support break and continue during loop unrolling.
     for (size_t iter = 0;; ++iter) {
-      // TODO: warn if this iterates too many times
+      if (iter >= 1024 && (iter & (iter - 1)) == 0) {
+        context_.diagnostics.warning(DiagnosticId::kLoweringLargeCompileTimeLoop,
+                                     std::to_string(iter));
+      }
       if (!stmt.stopExpr) {
-        // TODO: handle break/continue
         throw std::logic_error("for-loop without stop condition is unsupported");
       }
       ExprId stop_id = build_expr(*stmt.stopExpr, builder_.get_expr_builder(), context_);

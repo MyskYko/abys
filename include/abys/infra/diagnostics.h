@@ -20,6 +20,7 @@ enum class DiagnosticId : uint16_t {
   kLoweringUnconnectedInputPort,
   kLoweringProceduralBlockIgnored,
   kLoweringTaskIgnored,
+  kLoweringLargeCompileTimeLoop,
   kFrontendUnhandledSynthesisAttribute,
   kFrontendUnhandledSynthesisComment,
 };
