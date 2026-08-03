@@ -50,16 +50,10 @@ private:
   emit_expr_packed(const ExprGraph &expr_graph, ExprId id, std::map<ExprId, std::string> &names,
                    std::ostream &decl_os, std::ostream &os, std::string_view indent,
                    const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
-  void emit_expr_inline(const ExprGraph &expr_graph, ExprId id, std::string_view lhs,
-                        std::ostream &os,
-                        const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
   bool lookup_assumed_condition(const ExprGraph &expr_graph, ExprId id,
                                 const std::unordered_map<std::string, bool> *assumptions,
                                 bool &value) const;
   static bool can_emit_direct_range_base(const ExprGraph &expr_graph, ExprId id);
-  void emit_shifted_range(const ExprGraph &expr_graph, ExprId data_id, ExprId base_id,
-                          SignalWidth width, std::string_view lhs, std::ostream &os,
-                          const std::unordered_map<std::string, bool> *assumptions = nullptr) const;
 };
 
 } // namespace abys::ir

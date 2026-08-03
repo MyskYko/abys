@@ -161,7 +161,10 @@ public:
             continue;
           }
           if (expr->kind != slang::ast::ExpressionKind::NamedValue) {
-            const NodeId input_id = create_expr_node(*expr);
+            const SignalType signal_type = get_signal_type(*expr->type);
+            const std::string temporary_name = builder_.create_temporary_signal(
+                module_id, signal_type.width, signal_type.sign, signal_type.unpacked_dims);
+            const NodeId input_id = create_expr_node(*expr, temporary_name);
             builder_.add_node_input(module_id, node_id, input_id);
           } else {
             SignalWidth width;
