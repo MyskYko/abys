@@ -10,16 +10,17 @@
 #include <vector>
 
 namespace abys::ir {
-TigBuilder::TigBuilder(Tig &design, Diagnostics &diagnostics)
-    : design_(design), diagnostics_(diagnostics), signal_maps_(design.modules.size()),
-      pending_ffs_(design.modules.size()), input_specs_(design.modules.size()) {}
+TigBuilder::TigBuilder(Tig &design, Diagnostics &diagnostics, const NamingOptions &naming)
+    : design_(design), diagnostics_(diagnostics), naming_(naming),
+      signal_maps_(design.modules.size()), pending_ffs_(design.modules.size()),
+      input_specs_(design.modules.size()) {}
 
 void TigBuilder::set_top_module(std::string name) {
   design_.top_module_name = std::move(name);
 }
 
 std::string TigBuilder::generate_temporary_name() {
-  return std::string("abys_temporary_") + std::to_string(design_.temporary_name_count++);
+  return naming_.builder_temporary_signal_prefix + std::to_string(temporary_name_count_++);
 }
 
 std::string TigBuilder::create_temporary_signal(ModuleId module_id, SignalWidth width, bool sign,
@@ -54,15 +55,17 @@ void TigBuilder::add_input_spec(ModuleId module_id, NodeId node_id, SignalSpec i
 }
 
 TigBuilder::ModuleId TigBuilder::create_module(std::string name) {
-  size_t &count = design_.module_name_counts[name];
+  size_t &count = module_name_counts_[name];
+  std::string variant_suffix;
   if (count == 0) {
     ++count;
   } else {
-    name += "__abys_" + std::to_string(count++);
+    variant_suffix = naming_.builder_module_variant_prefix + std::to_string(count++);
   }
   ModuleId module_id = static_cast<ModuleId>(design_.modules.size());
   design_.modules.emplace_back();
   design_.modules.back().name = std::move(name);
+  design_.modules.back().variant_suffix = std::move(variant_suffix);
   signal_maps_.emplace_back();
   pending_ffs_.emplace_back();
   input_specs_.emplace_back();
@@ -356,7 +359,7 @@ void TigBuilder::wire_connections(ModuleId module_id) {
         const auto it = signal_map.find(name);
         if (it == signal_map.end()) {
           diagnostics_.warning(DiagnosticId::kLoweringUnresolvedSignalInput,
-                               module.name + "." + name);
+                               module.name + module.variant_suffix + "." + name);
           continue;
         }
         assert(it->second.node_id != kInvalidNodeId);

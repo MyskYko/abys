@@ -8,6 +8,7 @@
 
 #include "abys/diagnostics.h"
 #include "abys/ir/tig.h"
+#include "abys/naming.h"
 
 namespace abys::ir {
 
@@ -15,6 +16,9 @@ class TigBuilder {
 private:
   Tig &design_;
   Diagnostics &diagnostics_;
+  const NamingOptions &naming_;
+  uint32_t temporary_name_count_ = 0;
+  std::unordered_map<std::string, size_t> module_name_counts_;
 
 public:
   using NodeId = Tig::NodeId;
@@ -48,7 +52,7 @@ private:
   void add_input_spec(ModuleId module_id, NodeId node_id, SignalSpec input_spec);
 
 public:
-  TigBuilder(Tig &design, Diagnostics &diagnostics);
+  TigBuilder(Tig &design, Diagnostics &diagnostics, const NamingOptions &naming);
   void set_top_module(std::string name);
   std::string generate_temporary_name();
   std::string create_temporary_signal(ModuleId module_id, SignalWidth width, bool sign,

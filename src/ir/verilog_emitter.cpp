@@ -9,7 +9,8 @@
 
 namespace abys::ir {
 
-VerilogEmitter::VerilogEmitter(const Tig &design) : design_(design) {}
+VerilogEmitter::VerilogEmitter(const Tig &design, const NamingOptions &naming)
+    : design_(design), naming_(naming) {}
 
 void VerilogEmitter::emit(std::ostream &os) const {
   bool first = true;
@@ -32,7 +33,7 @@ void VerilogEmitter::emit_module(const Module &module, std::ostream &os) const {
 }
 
 void VerilogEmitter::emit_module_header(const Module &module, std::ostream &os) {
-  os << "module " << module.name << " (\n";
+  os << "module " << module.name << module.variant_suffix << " (\n";
   bool first = true;
   for (const auto &input : module.input_ports) {
     if (!first) {
@@ -108,7 +109,7 @@ void VerilogEmitter::emit_instances(const Module &module, std::ostream &os) cons
     }
     const auto &child = design_.modules[node.module_id];
     const std::string inst = node.name;
-    os << "  " << child.name << " " << inst << " (\n";
+    os << "  " << child.name << child.variant_suffix << " " << inst << " (\n";
     bool first = true;
     for (size_t i = 0; i < child.input_ports.size(); ++i) {
       if (!first) {
@@ -533,7 +534,9 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     return it->second;
   }
 
-  auto temp_name = [&]() { return "_abys_tmp_" + std::to_string(id); };
+  auto temp_name = [&]() {
+    return naming_.emitter_temporary_signal_prefix + std::to_string(id);
+  };
   auto declare_temp = [&](const ExprGraph::Node &node, std::string_view name) {
     decl_os << indent << "logic ";
     if (node.sign) {

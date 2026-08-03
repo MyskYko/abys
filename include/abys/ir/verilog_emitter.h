@@ -7,12 +7,13 @@
 #include <vector>
 
 #include "abys/ir/tig.h"
+#include "abys/naming.h"
 
 namespace abys::ir {
 
 class VerilogEmitter {
 public:
-  explicit VerilogEmitter(const Tig &design);
+  VerilogEmitter(const Tig &design, const NamingOptions &naming);
   void emit(std::ostream &os) const;
   // std::string emit_to_string(const Design& design) const;
 
@@ -24,6 +25,7 @@ private:
   static constexpr bool kUsePartialAssignmentForMaskedAssign = true;
 
   const Tig &design_;
+  const NamingOptions &naming_;
 
   void emit_module(const Module &module, std::ostream &os) const;
   static void emit_module_header(const Module &module, std::ostream &os);

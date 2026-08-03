@@ -2,7 +2,6 @@
 
 #include <limits>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "abys/ir/expr.h"
@@ -63,6 +62,7 @@ struct Tig {
     };
 
     std::string name;
+    std::string variant_suffix;
     std::vector<SignalProperties> input_ports;
     std::vector<SignalProperties> output_ports;
     std::vector<Node> nodes;
@@ -78,9 +78,7 @@ struct Tig {
 
   std::string top_module_name;
   std::vector<Module> modules;
-  std::unordered_map<std::string, size_t> module_name_counts;
   std::vector<Subroutine> subroutines;
-  uint32_t temporary_name_count = 0;
 };
 
 } // namespace abys::ir

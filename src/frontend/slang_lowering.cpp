@@ -20,7 +20,17 @@ private:
   std::unordered_map<const slang::ast::InstanceBodySymbol *, ModuleId> module_ids_;
 
   std::string suffix_;
+  size_t anonymous_block_count_ = 0;
   SlangLoweringContext context_;
+  const NamingOptions &naming_;
+
+  template <typename T> void visit_with_suffix(const T &symbol, std::string fragment) {
+    std::string previous = std::move(suffix_);
+    suffix_ = previous.empty() ? naming_.lowering_scope_marker : previous;
+    suffix_ += std::move(fragment);
+    this->visitDefault(symbol);
+    suffix_ = std::move(previous);
+  }
 
   ModuleId current_module_id() const {
     if (module_stack_.empty()) {
@@ -51,8 +61,9 @@ private:
   }
 
 public:
-  SlangLoweringVisitor(TigBuilder &builder, Diagnostics &diagnostics, const PragmaMap &pragmas)
-      : builder_(builder), pragmas_(pragmas), context_(diagnostics) {}
+  SlangLoweringVisitor(TigBuilder &builder, Diagnostics &diagnostics, const PragmaMap &pragmas,
+                       const NamingOptions &naming)
+      : builder_(builder), pragmas_(pragmas), context_(diagnostics), naming_(naming) {}
 
 private:
   std::string extract_output_named_value(const slang::ast::Expression &expr) {
@@ -456,35 +467,29 @@ public:
   }
 
   void handle(const slang::ast::StatementBlockSymbol &symbol) {
-    std::string suffix = suffix_;
-    if (suffix_.empty()) {
-      suffix_ = "_abys";
+    std::string fragment;
+    if (symbol.name.empty()) {
+      fragment = naming_.lowering_scope_separator + naming_.lowering_anonymous_block_name +
+                 std::to_string(anonymous_block_count_++);
+    } else {
+      fragment = naming_.lowering_scope_separator + std::string(symbol.name);
     }
-    // TODO: maybe generate a random signature when symbol.name.empty()
-    suffix_ += "_" + std::string(symbol.name);
-    this->visitDefault(symbol);
-    suffix_ = suffix;
+    visit_with_suffix(symbol, std::move(fragment));
   }
 
   void handle(const slang::ast::GenerateBlockSymbol &symbol) {
     if (symbol.isUninstantiated) {
       return;
     }
-    std::string frag = "_";
+    std::string frag = naming_.lowering_scope_separator;
     frag += symbol.getExternalName();
     if (symbol.arrayIndex) {
       auto idx = symbol.arrayIndex->as<int64_t>();
       if (idx) {
-        frag += "_" + std::to_string(*idx);
+        frag += naming_.lowering_scope_separator + std::to_string(*idx);
       }
     }
-    std::string suffix = suffix_;
-    if (suffix_.empty()) {
-      suffix_ = "_abys"; // TODO: add prefix/suffix management system for internal signals
-    }
-    suffix_ += frag;
-    this->visitDefault(symbol);
-    suffix_ = suffix;
+    visit_with_suffix(symbol, std::move(frag));
   }
 
   void handle(const slang::ast::GenerateBlockArraySymbol &symbol) { this->visitDefault(symbol); }
@@ -493,13 +498,14 @@ public:
 };
 
 Tig lower_slang_ast_to_ir(const slang::ast::RootSymbol &root, Diagnostics &diagnostics,
-                          const PragmaMap &pragmas, std::string_view top) {
+                          const PragmaMap &pragmas, std::string_view top,
+                          const NamingOptions &naming) {
   Tig design;
-  TigBuilder builder(design, diagnostics);
+  TigBuilder builder(design, diagnostics, naming);
   if (!top.empty()) {
     builder.set_top_module(std::string(top));
   }
-  SlangLoweringVisitor visitor(builder, diagnostics, pragmas);
+  SlangLoweringVisitor visitor(builder, diagnostics, pragmas, naming);
   root.visit(visitor);
   builder.flatten_calls();
   return design;

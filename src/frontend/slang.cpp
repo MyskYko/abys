@@ -66,7 +66,8 @@ ParseResult parse_systemverilog(const std::vector<std::string> &files, std::stri
 }
 
 TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &files,
-                                            std::string_view top, Diagnostics &diagnostics) {
+                                            std::string_view top, Diagnostics &diagnostics,
+                                            const NamingOptions &naming) {
   if (files.empty()) {
     return {false, "no input files provided", {}};
   }
@@ -103,7 +104,7 @@ TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &file
 
   frontend::PragmaMap pragmas = frontend::collect_pragmas(driver, diagnostics);
   ir::Tig design =
-      frontend::lower_slang_ast_to_ir(compilation->getRoot(), diagnostics, pragmas, top);
+      frontend::lower_slang_ast_to_ir(compilation->getRoot(), diagnostics, pragmas, top, naming);
 
   return {true, "ok", std::move(design)};
 }

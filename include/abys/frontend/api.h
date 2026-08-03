@@ -6,6 +6,7 @@
 
 #include "abys/diagnostics.h"
 #include "abys/ir/tig.h"
+#include "abys/naming.h"
 
 namespace abys {
 
@@ -26,6 +27,7 @@ ParseResult parse_systemverilog(const std::vector<std::string> &files, std::stri
 
 /// Build a TIG design from one or more SystemVerilog sources using slang.
 TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &files,
-                                            std::string_view top, Diagnostics &diagnostics);
+                                            std::string_view top, Diagnostics &diagnostics,
+                                            const NamingOptions &naming);
 
 } // namespace abys

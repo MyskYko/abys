@@ -102,13 +102,14 @@ int main(int argc, char **argv) {
     }
 
     abys::Diagnostics diagnostics(std::cerr);
-    const auto result = abys::build_tig_from_systemverilog(files, top, diagnostics);
+    abys::NamingOptions naming;
+    const auto result = abys::build_tig_from_systemverilog(files, top, diagnostics, naming);
     if (!result.ok) {
       std::cerr << "emit failed: " << result.message << '\n';
       return 2;
     }
 
-    abys::ir::VerilogEmitter emitter(result.design);
+    abys::ir::VerilogEmitter emitter(result.design, naming);
     if (out_path) {
       std::ofstream output_stream(*out_path);
       if (!output_stream) {
