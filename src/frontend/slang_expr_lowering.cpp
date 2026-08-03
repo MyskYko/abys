@@ -9,6 +9,16 @@ private:
   SlangLoweringContext &context_;
   std::vector<ExprId> expr_stack_;
 
+  bool try_lower_integer_constant(const slang::ast::Expression &expr) {
+    const auto *const value = expr.getConstant();
+    if (!value || !*value || !value->isInteger()) {
+      return false;
+    }
+    expr_stack_.push_back(builder_.find_or_create_const(
+        value->integer().toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr)));
+    return true;
+  }
+
 public:
   explicit SlangExprLoweringVisitor(ExprBuilder &builder, SlangLoweringContext &context)
       : builder_(builder), context_(context) {}
@@ -54,14 +64,9 @@ public:
   }
 
   void handle(const slang::ast::StringLiteral &expr) {
-    const auto *const constant_value = expr.getConstant();
-    if (!constant_value || !*constant_value || !constant_value->isInteger()) {
+    if (!try_lower_integer_constant(expr)) {
       throw std::logic_error("String literal did not lower to integer constant");
     }
-    const slang::SVInt integer_value = constant_value->integer();
-    ExprId id = builder_.find_or_create_const(integer_value.toString(slang::LiteralBase::Binary),
-                                              expr_width(expr), expr_sign(expr));
-    expr_stack_.push_back(id);
   }
 
   void handle(const slang::ast::UnbasedUnsizedIntegerLiteral &expr) {
@@ -72,14 +77,7 @@ public:
   }
 
   void handle(const slang::ast::CallExpression &expr) {
-    // TODO: it seems some parameters do not get evaluated as a constant, so remembering system call
-    // may be necessary as well, then cv stuff may not be needed any longer
-    const auto *const constant_value = expr.getConstant();
-    if (constant_value && *constant_value && constant_value->isInteger()) {
-      const slang::SVInt integer_value = constant_value->integer();
-      const ExprId id = builder_.find_or_create_const(
-          integer_value.toString(slang::LiteralBase::Binary), expr_width(expr), expr_sign(expr));
-      expr_stack_.push_back(id);
+    if (try_lower_integer_constant(expr)) {
       return;
     }
     if (expr.thisClass() != nullptr) {
@@ -129,7 +127,9 @@ public:
   }
 
   void handle(const slang::ast::ElementSelectExpression &expr) {
-    // TODO: support unpacked parameter array
+    if (try_lower_integer_constant(expr)) {
+      return;
+    }
     this->visitDefault(expr);
     const ExprId index = expr_stack_.back();
     expr_stack_.pop_back();

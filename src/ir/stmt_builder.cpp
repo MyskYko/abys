@@ -14,14 +14,11 @@ StmtBuilder::StmtBuilder(ExprGraph &expr_graph) : expr_graph_(expr_graph) {
 ExprBuilder &StmtBuilder::get_expr_builder() {
   return contexts_.back().expr_builder;
 }
-std::vector<std::string> &StmtBuilder::output_names() {
-  return contexts_.back().output_names;
-}
-std::vector<bool> &StmtBuilder::output_nonblocking() {
-  return contexts_.back().output_nonblocking;
-}
-std::vector<ExprId> &StmtBuilder::output_ids() {
-  return contexts_.back().output_ids;
+void StmtBuilder::add_output(std::string name, bool nonblocking, ExprId id) {
+  Context &context = contexts_.back();
+  context.output_names.push_back(std::move(name));
+  context.output_nonblocking.push_back(nonblocking);
+  context.output_ids.push_back(id);
 }
 std::unordered_map<std::string, ExprId> &StmtBuilder::scheduled_assignments() {
   return contexts_.back().scheduled_assignments;
@@ -133,9 +130,7 @@ void StmtBuilder::transfer_output(const Context &from, size_t i, ExprId expr_id)
     get_expr_builder().update_value(from.output_names[i], expr_id);
   }
   scheduled_assignments()[from.output_names[i]] = expr_id;
-  output_names().push_back(from.output_names[i]);
-  output_nonblocking().push_back(from.output_nonblocking[i]);
-  output_ids().push_back(expr_id);
+  add_output(from.output_names[i], from.output_nonblocking[i], expr_id);
 }
 
 std::vector<size_t> StmtBuilder::collect_last_output_indices(Context &ctx) const {
@@ -353,9 +348,7 @@ void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case
       expr_builder.update_value(entry.first, new_id);
     }
     scheduled_assignments()[entry.first] = new_id;
-    output_names().push_back(entry.first);
-    output_nonblocking().push_back(is_nonblocking);
-    output_ids().push_back(new_id);
+    add_output(entry.first, is_nonblocking, new_id);
   }
   while (context_stack_.size() > stack_index) {
     context_stack_.pop_back();

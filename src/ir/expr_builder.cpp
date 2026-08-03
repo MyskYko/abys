@@ -70,7 +70,6 @@ ExprId ExprBuilder::find_or_create_const(std::string value, SignalWidth width, b
       return ExprGraph::constant_one;
     }
   }
-  // TODO: x and z fall through; verify it works with other parts
   const ExprId id = create_node();
   graph_.constants.emplace_back(ExprGraph::Constant{id, std::move(value)});
   auto &node = get_node(id);
@@ -140,7 +139,6 @@ ExprId ExprBuilder::create_unary(ExprGraph::Op op, ExprId operand) {
   return id;
 }
 ExprId ExprBuilder::create_bitwise_not(ExprId operand) {
-  // TODO: is sign correct?
   return create_unary(ExprGraph::Op::kBitwiseNot, operand);
 }
 
@@ -441,7 +439,7 @@ BitIndex ExprBuilder::normalize_index(BitIndex index, BitIndex msb, BitIndex lsb
   return lsb - index;
 }
 ExprId ExprBuilder::normalize_index_expr(ExprId index, BitIndex msb, BitIndex lsb) {
-  // TODO: not sure about bitwidth and signedness
+  // TODO: size and sign index normalization using the selector, declared bounds, and array span.
   if (lsb == 0 && msb >= lsb) {
     return index;
   }
@@ -883,7 +881,8 @@ std::optional<int> ExprBuilder::try_evaluate(ExprId id) const {
     return std::nullopt;
   case ExprGraph::Op::kConvert:
     return try_evaluate(node.operands[0]);
-    // TODO: extend constant evaluation for these expression forms as needed.
+    // TODO: extend these cases after constant evaluation supports structured arbitrary-width
+    // values.
   case ExprGraph::Op::kList:
   case ExprGraph::Op::kCase:
   case ExprGraph::Op::kConcat:

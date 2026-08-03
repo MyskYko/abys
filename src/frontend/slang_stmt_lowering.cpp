@@ -28,9 +28,7 @@ public:
       ExprId expr_id = build_expr(*init, builder_.get_expr_builder(), context_);
       builder_.get_expr_builder().update_value(name, expr_id);
       builder_.scheduled_assignments()[name] = expr_id;
-      builder_.output_names().push_back(name);
-      builder_.output_nonblocking().push_back(false);
-      builder_.output_ids().push_back(expr_id);
+      builder_.add_output(name, false, expr_id);
     }
   }
 
@@ -109,9 +107,7 @@ public:
           }
           builder_.get_expr_builder().update_value(output_name, expr_id);
           builder_.scheduled_assignments()[output_name] = expr_id;
-          builder_.output_names().push_back(output_name);
-          builder_.output_nonblocking().push_back(nonblocking);
-          builder_.output_ids().push_back(expr_id);
+          builder_.add_output(output_name, nonblocking, expr_id);
         });
     for (const auto &kv : to_restore) {
       builder_.get_expr_builder().update_value(kv.first, kv.second);
@@ -197,9 +193,7 @@ public:
           ExprId expr_id = build_expr(*init, builder_.get_expr_builder(), context_);
           builder_.get_expr_builder().update_value(name, expr_id);
           builder_.scheduled_assignments()[name] = expr_id;
-          builder_.output_names().push_back(name);
-          builder_.output_nonblocking().push_back(false);
-          builder_.output_ids().push_back(expr_id);
+          builder_.add_output(name, false, expr_id);
         }
       }
     }
@@ -222,9 +216,7 @@ public:
                            [&](const std::string &output_name, ExprId expr_id) {
                              builder_.get_expr_builder().update_value(output_name, expr_id);
                              builder_.scheduled_assignments()[output_name] = expr_id;
-                             builder_.output_names().push_back(output_name);
-                             builder_.output_nonblocking().push_back(false);
-                             builder_.output_ids().push_back(expr_id);
+                             builder_.add_output(output_name, false, expr_id);
                            });
     }
     for (size_t iter = 0;; ++iter) {
@@ -263,9 +255,7 @@ public:
                              [&](const std::string &output_name, ExprId expr_id) {
                                builder_.get_expr_builder().update_value(output_name, expr_id);
                                builder_.scheduled_assignments()[output_name] = expr_id;
-                               builder_.output_names().push_back(output_name);
-                               builder_.output_nonblocking().push_back(false);
-                               builder_.output_ids().push_back(expr_id);
+                               builder_.add_output(output_name, false, expr_id);
                              });
       }
     }

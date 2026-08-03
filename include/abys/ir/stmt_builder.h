@@ -16,10 +16,7 @@ public:
   explicit StmtBuilder(ExprGraph &expr_graph);
 
   ExprBuilder &get_expr_builder();
-  std::vector<std::string> &output_names(); // TODO: this and the following three may be replaced by
-                                            // add_output(string, bool, ExprId) API
-  std::vector<bool> &output_nonblocking();
-  std::vector<ExprId> &output_ids();
+  void add_output(std::string name, bool nonblocking, ExprId id);
   std::unordered_map<std::string, ExprId> &scheduled_assignments();
   void add_local_variable(std::string name);
   size_t get_context_stack_index() const;
@@ -81,7 +78,6 @@ public:
     }
     for (const auto &kv : info) {
       if (kv.second.seen_blocking && kv.second.seen_nonblocking) {
-        // TODO: we do not really enforce always_ff with blocking yet
         throw std::logic_error("Mixed blocking and nonblocking assignments to " + kv.first);
       }
       func(kv.first, kv.second.expr_id);
