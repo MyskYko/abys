@@ -1,6 +1,5 @@
 #pragma once
 
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -51,7 +50,7 @@ public:
                   bool full_case = false);
 
   // API for exporting info for creating a tig node
-  void get_timing_spec(const std::vector<std::pair<std::string, ExprId>> &outputs,
+  bool get_timing_spec(const std::vector<std::pair<std::string, ExprId>> &outputs,
                        std::string &clk_name, SignalWidth &clk_width, bool &clk_sign,
                        EdgeKind &clk_edge, std::string &rst_name, SignalWidth &rst_width,
                        bool &rst_sign, EdgeKind &rst_edge) const;
@@ -79,7 +78,7 @@ public:
     }
     for (const auto &kv : info) {
       if (kv.second.seen_blocking && kv.second.seen_nonblocking) {
-        throw std::logic_error("Mixed blocking and nonblocking assignments to " + kv.first);
+        diagnostics_.error(DiagnosticId::kLoweringMixedAssignmentTreatedAsNonblocking, kv.first);
       }
       func(kv.first, kv.second.expr_id);
     }

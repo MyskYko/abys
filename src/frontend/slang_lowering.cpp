@@ -42,7 +42,7 @@ private:
   NodeId create_expr_node(const slang::ast::Expression &expr, std::string output_name = "") {
     const ModuleId module_id = current_module_id();
     const NodeId node_id = builder_.create_operation(module_id);
-    ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
+    ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id), context_.diagnostics);
     const ExprId expr_id = build_expr(expr, expr_builder, context_);
     expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
       builder_.add_node_input_spec(module_id, node_id, name, width, sign);
@@ -53,7 +53,7 @@ private:
 
   std::string create_signal(const slang::ast::ValueSymbol &symbol) {
     const auto &type = symbol.getType().getCanonicalType();
-    SignalType signal_type = get_signal_type(type);
+    SignalType signal_type = get_signal_type(type, context_.diagnostics);
     std::string name = register_symbol_name(symbol, context_.special_symbols, suffix_);
     builder_.create_signal(current_module_id(), name, signal_type.width, signal_type.sign,
                            std::move(signal_type.unpacked_dims));
@@ -75,7 +75,7 @@ private:
 
 public:
   template <typename T> void handle(const T &) {
-    throw std::logic_error(std::string("Unhandled AST node: ") + typeid(T).name());
+    context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedAstNode, typeid(T).name());
   }
 
   void handle(const slang::ast::SpecifyBlockSymbol &) {}
@@ -91,16 +91,20 @@ public:
   void handle(const slang::ast::PortSymbol &symbol) {
     this->visitDefault(symbol);
     if (symbol.direction == slang::ast::ArgumentDirection::InOut) {
-      throw std::logic_error("InOut ports are not supported");
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedPortIgnored,
+                                 std::string(symbol.name) + " (inout)");
+      return;
     }
     if (symbol.direction == slang::ast::ArgumentDirection::Ref) {
-      throw std::logic_error("Ref ports are not supported");
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedPortIgnored,
+                                 std::string(symbol.name) + " (ref)");
+      return;
     }
-    const SignalType signal_type = get_signal_type(symbol.getType());
+    const SignalType signal_type = get_signal_type(symbol.getType(), context_.diagnostics);
     if (symbol.direction == slang::ast::ArgumentDirection::In) {
-      NodeId node_id = builder_.create_module_input(
-          current_module_id(), std::string(symbol.name), signal_type.width, signal_type.sign,
-          signal_type.unpacked_dims);
+      NodeId node_id = builder_.create_module_input(current_module_id(), std::string(symbol.name),
+                                                    signal_type.width, signal_type.sign,
+                                                    signal_type.unpacked_dims);
       (void)node_id;
     } else if (symbol.direction == slang::ast::ArgumentDirection::Out) {
       NodeId node_id = builder_.create_module_output(
@@ -108,15 +112,18 @@ public:
           std::string(symbol.name), TigBuilder::kInvalidNodeId, 0, signal_type.unpacked_dims);
       (void)node_id;
     } else {
-      throw std::logic_error("Unknown port direction");
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedPortIgnored,
+                                 std::string(symbol.name) + " (unknown direction)");
     }
   }
 
   void handle(const slang::ast::InstanceBodySymbol &symbol) {
     const auto &definition = symbol.getDefinition();
     if (definition.definitionKind != slang::ast::DefinitionKind::Module) {
-      throw std::logic_error(std::string("Unhandled definition kind: ") +
-                             definition_kind_to_string(definition.definitionKind));
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedDefinitionIgnored,
+                                 std::string(definition.name) + " (" +
+                                     definition_kind_to_string(definition.definitionKind) + ")");
+      return;
     }
 
     if (module_ids_.contains(&symbol)) {
@@ -145,7 +152,9 @@ public:
       const auto &body = symbol.getCanonicalBody() ? *symbol.getCanonicalBody() : symbol.body;
       const auto it = module_ids_.find(&body);
       if (it == module_ids_.end()) {
-        throw std::logic_error("Instance references an unknown module body");
+        context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedInstanceIgnored,
+                                   std::string(symbol.name) + " (unknown module body)");
+        return;
       }
       const ModuleId instance_module_id = it->second;
 
@@ -154,11 +163,16 @@ public:
 
       for (const auto *conn : symbol.getPortConnections()) {
         if (!conn) {
-          throw std::logic_error("Instance contains a null port connection");
+          context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedInstanceConnectionIgnored,
+                                     std::string(symbol.name) + " (null connection)");
+          continue;
         }
         const auto &port_symbol = conn->port;
         if (port_symbol.kind != slang::ast::SymbolKind::Port) {
-          throw std::logic_error("Instance connection does not reference a port symbol");
+          context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedInstanceConnectionIgnored,
+                                     std::string(symbol.name) +
+                                         " (connection does not reference a port)");
+          continue;
         }
         const auto &port = port_symbol.as<slang::ast::PortSymbol>();
         const slang::ast::Expression *expr = conn->getExpression();
@@ -170,7 +184,7 @@ public:
             continue;
           }
           if (expr->kind != slang::ast::ExpressionKind::NamedValue) {
-            const SignalType signal_type = get_signal_type(*expr->type);
+            const SignalType signal_type = get_signal_type(*expr->type, context_.diagnostics);
             const std::string temporary_name = builder_.create_temporary_signal(
                 module_id, signal_type.width, signal_type.sign, signal_type.unpacked_dims);
             const NodeId input_id = create_expr_node(*expr, temporary_name);
@@ -178,41 +192,54 @@ public:
           } else {
             SignalWidth width;
             bool sign;
-            get_width_sign(*expr->type, width, sign);
-            builder_.add_node_input_spec(
-                module_id, node_id, extract_named_value(*expr, context_.special_symbols),
-                width, sign);
+            get_width_sign(*expr->type, width, sign, context_.diagnostics);
+            builder_.add_node_input_spec(module_id, node_id,
+                                         extract_named_value(*expr, context_.special_symbols),
+                                         width, sign);
           }
         } else if (port.direction == slang::ast::ArgumentDirection::Out) {
           if (!expr) {
             SignalWidth width;
             bool sign;
-            get_width_sign(port.getType(), width, sign);
+            get_width_sign(port.getType(), width, sign, context_.diagnostics);
             builder_.add_node_output(module_id, node_id, "", width, sign);
             continue;
           }
           if (expr->kind != slang::ast::ExpressionKind::Assignment) {
-            throw std::logic_error("Output port connection is not an assignment expression");
+            context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedInstanceConnectionIgnored,
+                                       std::string(symbol.name) + "." + std::string(port.name) +
+                                           " (output connection is not an assignment)");
+            SignalWidth width;
+            bool sign;
+            get_width_sign(port.getType(), width, sign, context_.diagnostics);
+            builder_.add_node_output(module_id, node_id, "", width, sign);
+            continue;
           }
           const auto &assign = expr->as<slang::ast::AssignmentExpression>();
           const auto &lhs = assign.left();
           SignalWidth rhs_width;
           bool rhs_sign;
-          get_width_sign(port.getType(), rhs_width, rhs_sign);
+          get_width_sign(port.getType(), rhs_width, rhs_sign, context_.diagnostics);
           NodeId output_node_id = node_id;
           ExprId output_expr_id = kInvalidExprId;
           if (assign.right().kind != slang::ast::ExpressionKind::EmptyArgument) {
             if (assign.right().kind != slang::ast::ExpressionKind::Conversion ||
                 assign.right().as<slang::ast::ConversionExpression>().operand().kind !=
                     slang::ast::ExpressionKind::EmptyArgument) {
-              throw std::logic_error("Unsupported output port conversion expression");
+              context_.diagnostics.error(
+                  DiagnosticId::kLoweringUnsupportedInstanceConnectionIgnored,
+                  std::string(symbol.name) + "." + std::string(port.name) +
+                      " (unsupported output conversion)");
+              builder_.add_node_output(module_id, node_id, "", rhs_width, rhs_sign);
+              continue;
             }
             const std::string temporary_name =
                 builder_.create_temporary_signal(module_id, rhs_width, rhs_sign);
             const PortIndex port_idx =
                 builder_.add_node_output(module_id, node_id, temporary_name, rhs_width, rhs_sign);
             output_node_id = builder_.create_operation(module_id);
-            ExprBuilder expr_builder(builder_.get_expr_graph(module_id, output_node_id));
+            ExprBuilder expr_builder(builder_.get_expr_graph(module_id, output_node_id),
+                                     context_.diagnostics);
             const ExprId input_id =
                 expr_builder.find_or_create_input(temporary_name, rhs_width, rhs_sign);
             output_expr_id = expr_builder.create_convert(input_id, expr_width(assign.right()),
@@ -230,7 +257,7 @@ public:
                                             true);
             }
           } else {
-            const SignalType signal_type = get_signal_type(port.getType());
+            const SignalType signal_type = get_signal_type(port.getType(), context_.diagnostics);
             const std::string temporary_name = builder_.create_temporary_signal(
                 module_id, signal_type.width, signal_type.sign, signal_type.unpacked_dims);
             PortIndex port_idx;
@@ -242,7 +269,8 @@ public:
                                                        output_expr_id, true);
             }
             const NodeId op_id = builder_.create_operation(module_id);
-            ExprBuilder expr_builder(builder_.get_expr_graph(module_id, op_id));
+            ExprBuilder expr_builder(builder_.get_expr_graph(module_id, op_id),
+                                     context_.diagnostics);
             ExprId rhs_id = expr_builder.find_or_create_input(temporary_name, rhs_width, rhs_sign);
             std::unordered_map<std::string, ExprId> to_store;
             lower_lhs_assignment(lhs, rhs_id, rhs_width, expr_builder, context_, nullptr,
@@ -256,7 +284,9 @@ public:
             }
           }
         } else {
-          throw std::logic_error("Unsupported instance port direction");
+          context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedInstanceConnectionIgnored,
+                                     std::string(symbol.name) + "." + std::string(port.name) +
+                                         " (unsupported port direction)");
         }
       }
 
@@ -272,11 +302,14 @@ public:
                                        primitive_name == "or" || primitive_name == "nor" ||
                                        primitive_name == "xor" || primitive_name == "xnor";
     if (!multi_output_primitive && !multi_input_primitive) {
-      throw std::logic_error("Unsupported primitive instance: " + std::string(primitive_name));
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedInstanceIgnored,
+                                 std::string(symbol.name) + " (" + std::string(primitive_name) +
+                                     " primitive)");
+      return;
     }
     const ModuleId module_id = current_module_id();
     const NodeId node_id = builder_.create_operation(module_id);
-    ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
+    ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id), context_.diagnostics);
     std::vector<const slang::ast::Expression *> outputs;
     std::vector<ExprId> inputs;
     if (multi_output_primitive) {
@@ -337,7 +370,7 @@ public:
     const auto &assign_expr = assign.as<slang::ast::AssignmentExpression>();
     const ModuleId module_id = current_module_id();
     const NodeId node_id = builder_.create_operation(module_id);
-    ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
+    ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id), context_.diagnostics);
     ExprId rhs_id = build_expr(assign_expr.right(), expr_builder, context_);
     const SignalWidth rhs_width = expr_builder.get_width(rhs_id);
     std::unordered_map<std::string, ExprId> to_store;
@@ -371,7 +404,7 @@ public:
     }
     const ModuleId module_id = current_module_id();
     const NodeId node_id = builder_.create_operation(module_id);
-    ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id));
+    ExprBuilder expr_builder(builder_.get_expr_graph(module_id, node_id), context_.diagnostics);
     ExprId rhs_id = build_expr(*init, expr_builder, context_);
     expr_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
       builder_.add_node_input_spec(module_id, node_id, name, width, sign);
@@ -403,10 +436,18 @@ public:
     case slang::ast::ProceduralBlockKind::Always:
       break; // undecided
     default:
-      throw std::logic_error("Unknown procedural block kind");
+      context_.diagnostics.error(
+          DiagnosticId::kLoweringProceduralBlockIgnored,
+          std::string(slang::ast::SemanticFacts::getProcedureKindStr(symbol.procedureKind)));
+      return;
     }
     const slang::ast::Statement &stmt = symbol.getBody();
     lower_statement(stmt, stmt_builder, context_, pragmas_);
+    if (stmt_builder.is_undecided()) {
+      context_.diagnostics.error(
+          DiagnosticId::kLoweringUndecidedProcessTreatedAsCombOrLatch);
+      stmt_builder.set_comb_or_latch();
+    }
     stmt_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
       builder_.add_node_input_spec(module_id, node_id, name, width, sign);
     });
@@ -424,8 +465,13 @@ public:
     SignalWidth clk_width, rst_width;
     bool clk_sign, rst_sign;
     EdgeKind clk_edge, rst_edge;
-    stmt_builder.get_timing_spec(outputs, clk_name, clk_width, clk_sign, clk_edge, rst_name,
-                                 rst_width, rst_sign, rst_edge);
+    if (!stmt_builder.get_timing_spec(outputs, clk_name, clk_width, clk_sign, clk_edge, rst_name,
+                                      rst_width, rst_sign, rst_edge)) {
+      for (const auto &kv : outputs) {
+        builder_.add_node_output_expr(module_id, node_id, kv.first, kv.second, true);
+      }
+      return;
+    }
     for (const auto &kv : outputs) {
       const PortIndex port_idx = builder_.add_node_output_expr(module_id, node_id, kv.first,
                                                                kv.second, stmt_builder.is_comb());
@@ -440,17 +486,23 @@ public:
       return;
     }
     const SubrId subr_id = context_.get_or_create_subr_id(symbol);
-    ExprGraph &expr_graph = builder_.create_subroutine(subr_id, std::string(symbol.name));
+    if (subr_id == kInvalidSubrId) {
+      return;
+    }
+    ExprGraph *expr_graph = builder_.create_subroutine(subr_id, std::string(symbol.name));
+    if (!expr_graph) {
+      return;
+    }
     for (const auto *arg : symbol.getArguments()) {
       if (arg->direction != slang::ast::ArgumentDirection::In) {
-        throw std::logic_error("Only input formals are supported in function lowering: " +
-                               std::string(symbol.name) + "." + std::string(arg->name));
+        context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedSubroutineFormalTreatedAsInput,
+                                   std::string(symbol.name) + "." + std::string(arg->name));
       }
-      SignalType signal_type = get_signal_type(arg->getType());
+      SignalType signal_type = get_signal_type(arg->getType(), context_.diagnostics);
       builder_.add_subroutine_input(subr_id, std::string(arg->name), signal_type.width,
                                     signal_type.sign, std::move(signal_type.unpacked_dims));
     }
-    StmtBuilder stmt_builder(expr_graph, context_.diagnostics);
+    StmtBuilder stmt_builder(*expr_graph, context_.diagnostics);
     const auto &return_type = symbol.getReturnType();
     const SignalWidth return_width = return_type.getBitstreamWidth();
     const std::string return_unknown(return_width, 'x');
@@ -459,9 +511,12 @@ public:
                                       std::to_string(return_width) + "'b" + return_unknown,
                                       return_width, return_type.isSigned()));
     lower_statement(symbol.getBody(), stmt_builder, context_, pragmas_);
-    const ExprId ret = stmt_builder.get_expr_builder().get_current_value(symbol.name);
+    ExprId ret = stmt_builder.get_expr_builder().get_current_value(symbol.name);
     if (ret == kInvalidExprId) {
-      throw std::logic_error("Function has no return assignment: " + std::string(symbol.name));
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedExpressionReplacedWithZero,
+                                 "function return: " + std::string(symbol.name));
+      ret = stmt_builder.get_expr_builder().find_or_create_const(
+          std::to_string(return_width) + "'b0", return_width, return_type.isSigned());
     }
     builder_.set_subroutine_root(subr_id, ret);
   }

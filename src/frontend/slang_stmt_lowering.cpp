@@ -23,7 +23,7 @@ public:
       : builder_(builder), context_(context), pragmas_(pragmas) {}
 
   template <typename T> void handle(const T &) {
-    throw std::logic_error(std::string("Unhandled AST node: ") + typeid(T).name());
+    context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedAstNode, typeid(T).name());
   }
 
   void handle(const slang::ast::EmptyStatement &) {}
@@ -93,13 +93,16 @@ public:
         case KnownSystemName::WriteMemB:
         case KnownSystemName::WriteMemH:
         default:
-          throw std::logic_error("Unsupported system call: " +
-                                 std::string(call.getSubroutineName()));
+          context_.diagnostics.error(DiagnosticId::kLoweringSystemCallIgnored,
+                                     std::string(call.getSubroutineName()));
+          return;
         }
       }
     }
     if (stmt.expr.kind != slang::ast::ExpressionKind::Assignment) {
-      throw std::logic_error("Non-assignment expression statement is unsupported");
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedStatementIgnored,
+                                 "non-assignment expression statement");
+      return;
     }
     const auto &assign = stmt.expr.as<slang::ast::AssignmentExpression>();
     ExprId rhs_id = build_assignment(assign);
@@ -209,7 +212,12 @@ public:
         continue;
       }
       if (init->kind != slang::ast::ExpressionKind::Assignment) {
-        throw std::logic_error("unsupported for-loop initializer");
+        context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedStatementIgnored,
+                                   "for-loop with unsupported initializer");
+        if (!stmt.loopVars.empty()) {
+          builder_.merge_context();
+        }
+        return;
       }
       const auto &assign = init->as<slang::ast::AssignmentExpression>();
       assert(!assign.isNonBlocking());
@@ -230,7 +238,12 @@ public:
                                      std::to_string(iter));
       }
       if (!stmt.stopExpr) {
-        throw std::logic_error("for-loop without stop condition is unsupported");
+        context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedStatementIgnored,
+                                   "for-loop without stop condition");
+        if (!stmt.loopVars.empty()) {
+          builder_.merge_context();
+        }
+        return;
       }
       ExprId stop_id = build_expr(*stmt.stopExpr, builder_.get_expr_builder(), context_);
       if (!builder_.get_expr_builder().evaluate(stop_id)) {
@@ -242,7 +255,12 @@ public:
           continue;
         }
         if (step->kind != slang::ast::ExpressionKind::Assignment) {
-          throw std::logic_error("unsupported for-loop step");
+          context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedStatementIgnored,
+                                     "for-loop with unsupported step");
+          if (!stmt.loopVars.empty()) {
+            builder_.merge_context();
+          }
+          return;
         }
         const auto &assign = step->as<slang::ast::AssignmentExpression>();
         assert(!assign.isNonBlocking());
@@ -278,13 +296,19 @@ public:
 
   void handle(const slang::ast::TimedStatement &stmt) {
     if (!builder_.is_root_context()) {
-      throw std::logic_error("TimedStatement in a non-root context");
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedStatementIgnored,
+                                 "timed statement in a non-root context");
+      return;
     }
     if (!builder_.is_ff() && !builder_.is_undecided()) {
-      throw std::logic_error("TimedStatement in always_comb or always_latch");
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedStatementIgnored,
+                                 "timed statement in combinational or latch block");
+      return;
     }
     if (builder_.has_timing()) {
-      throw std::logic_error("Nested TimedStatement");
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedStatementIgnored,
+                                 "nested timed statement");
+      return;
     }
     auto add_event = [&](const slang::ast::SignalEventControl &ev) {
       const ExprId expr_id = build_expr(ev.expr, builder_.get_expr_builder(), context_);
@@ -306,7 +330,9 @@ public:
       const auto &list = timing.as<slang::ast::EventListControl>();
       for (const auto *tc : list.events) {
         if (tc->kind != slang::ast::TimingControlKind::SignalEvent) {
-          throw std::logic_error("Unsupported timing event in list");
+          context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedTimingControlIgnored,
+                                     "event-list member");
+          continue;
         }
         add_event(tc->as<slang::ast::SignalEventControl>());
       }
@@ -314,16 +340,21 @@ public:
     }
     case slang::ast::TimingControlKind::ImplicitEvent:
       if (!builder_.is_undecided() || builder_.has_timing()) {
-        throw std::logic_error("Invalid implicit event timing");
+        context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedTimingControlIgnored,
+                                   "invalid implicit event");
+        return;
       }
       builder_.set_comb_or_latch();
       break;
     default:
-      throw std::logic_error("Unsupported timing control kind");
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedTimingControlIgnored);
+      return;
     }
     this->visitDefault(stmt);
     if (builder_.is_undecided()) {
-      throw std::logic_error("TimedStatement did not set policy");
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedTimingControlIgnored,
+                                 "timed statement did not establish a block policy");
+      builder_.set_comb_or_latch();
     }
   }
 };

@@ -10,6 +10,30 @@ private:
   ExprId compound_lhs_id_;
   std::vector<ExprId> expr_stack_;
 
+  ExprId create_zero(const slang::ast::Type &type) {
+    const auto &canonical_type = type.getCanonicalType();
+    if (canonical_type.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+      const auto &array_type = canonical_type.as<slang::ast::FixedSizeUnpackedArrayType>();
+      std::vector<ExprId> elements(array_type.range.width());
+      for (ExprId &element : elements) {
+        element = create_zero(array_type.elementType);
+      }
+      return builder_.create_gather(std::move(elements));
+    }
+    return builder_.create_convert(ExprGraph::constant_zero, type.getBitstreamWidth(),
+                                   type.isSigned());
+  }
+
+  void push_zero(const slang::ast::Expression &expr) {
+    expr_stack_.push_back(create_zero(*expr.type));
+  }
+
+  void replace_with_zero(const slang::ast::Expression &expr, std::string detail) {
+    context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedExpressionReplacedWithZero,
+                               std::move(detail));
+    push_zero(expr);
+  }
+
   bool try_lower_integer_constant(const slang::ast::Expression &expr) {
     const auto *const value = expr.getConstant();
     if (!value || !*value || !value->isInteger()) {
@@ -25,13 +49,18 @@ public:
                                     ExprId compound_lhs_id)
       : builder_(builder), context_(context), compound_lhs_id_(compound_lhs_id) {}
 
-  template <typename T> void handle(const T &) {
-    throw std::logic_error(std::string("Unhandled AST node: ") + typeid(T).name());
+  template <typename T> void handle(const T &node) {
+    if constexpr (std::is_base_of_v<slang::ast::Expression, T>) {
+      replace_with_zero(node, typeid(T).name());
+    } else {
+      context_.diagnostics.error(DiagnosticId::kLoweringUnsupportedAstNode, typeid(T).name());
+    }
   }
 
-  void handle(const slang::ast::LValueReferenceExpression &) {
+  void handle(const slang::ast::LValueReferenceExpression &expr) {
     if (compound_lhs_id_ == kInvalidExprId) {
-      throw std::logic_error("Lvalue reference outside compound assignment");
+      replace_with_zero(expr, "lvalue reference outside compound assignment");
+      return;
     }
     expr_stack_.push_back(compound_lhs_id_);
   }
@@ -48,7 +77,7 @@ public:
     const auto &type = *expr.type;
     SignalWidth width;
     bool sign;
-    get_width_sign(type, width, sign);
+    get_width_sign(type, width, sign, context_.diagnostics);
     if (expr.symbol.kind == slang::ast::SymbolKind::Parameter) {
       const auto &param = expr.symbol.as<slang::ast::ParameterSymbol>();
       const auto &value = param.getValue();
@@ -74,7 +103,7 @@ public:
 
   void handle(const slang::ast::StringLiteral &expr) {
     if (!try_lower_integer_constant(expr)) {
-      throw std::logic_error("String literal did not lower to integer constant");
+      replace_with_zero(expr, "string literal did not lower to integer constant");
     }
   }
 
@@ -90,8 +119,9 @@ public:
       return;
     }
     if (expr.thisClass() != nullptr) {
-      throw std::logic_error("Unsupported class member call: " +
-                             std::string(expr.getSubroutineName()));
+      replace_with_zero(expr,
+                        "unsupported class member call: " + std::string(expr.getSubroutineName()));
+      return;
     }
     if (expr.isSystemCall()) {
       using slang::parsing::KnownSystemName;
@@ -116,7 +146,9 @@ public:
             std::to_string(expr_width(expr)) + "'b0", expr_width(expr), expr_sign(expr)));
         return;
       default:
-        throw std::logic_error("Unsupported system call: " + std::string(expr.getSubroutineName()));
+        replace_with_zero(expr,
+                          "unsupported system call: " + std::string(expr.getSubroutineName()));
+        return;
       }
     }
     const size_t index = expr_stack_.size();
@@ -130,6 +162,10 @@ public:
     std::string name(expr.getSubroutineName());
     const auto *subroutine = std::get<const slang::ast::SubroutineSymbol *>(expr.subroutine);
     const SubrId subr_id = context_.get_or_create_subr_id(*subroutine);
+    if (subr_id == kInvalidSubrId) {
+      push_zero(expr);
+      return;
+    }
     const ExprId id = builder_.create_call(subr_id, std::move(name), std::move(operands),
                                            expr_width(expr), expr_sign(expr));
     expr_stack_.push_back(id);
@@ -148,14 +184,15 @@ public:
     if (type.isUnpackedArray()) {
       const auto &ct = type.getCanonicalType();
       if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
-        throw std::logic_error("Unsupported dynamic size unpacked array");
+        replace_with_zero(expr, "unsupported dynamic-size unpacked array selection");
+        return;
       }
       const auto &arr = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
       const auto range = arr.range;
       const auto &elem = arr.elementType;
       SignalWidth width;
       bool sign;
-      get_width_sign(elem, width, sign);
+      get_width_sign(elem, width, sign, context_.diagnostics);
       ExprId id =
           builder_.create_unpacked_select(data, index, range.left, range.right, width, sign);
       expr_stack_.push_back(id);
@@ -189,24 +226,33 @@ public:
     if (type.isUnpackedArray()) {
       const auto &ct = type.getCanonicalType();
       if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
-        throw std::logic_error("Unsupported dynamic size unpacked array");
+        replace_with_zero(expr, "unsupported dynamic-size unpacked array range selection");
+        return;
       }
       const auto &arr = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
       const slang::ConstantRange range = arr.range;
       ExprId base;
       SignalWidth width;
       if (kind == slang::ast::RangeSelectionKind::Simple) {
-        const BitIndex left_pos =
-            builder_.normalize_index(extract_constant_index(left), range.left, range.right);
-        const BitIndex right_pos =
-            builder_.normalize_index(extract_constant_index(right), range.left, range.right);
+        const auto left_index = try_extract_constant_index(left);
+        const auto right_index = try_extract_constant_index(right);
+        if (!left_index || !right_index) {
+          replace_with_zero(expr, "unpacked range bounds are not representable integer constants");
+          return;
+        }
+        const BitIndex left_pos = builder_.normalize_index(*left_index, range.left, range.right);
+        const BitIndex right_pos = builder_.normalize_index(*right_index, range.left, range.right);
         assert(left_pos >= right_pos);
         base = builder_.find_or_create_const(right_pos);
         width = static_cast<SignalWidth>(left_pos - right_pos + 1);
       } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
                  kind == slang::ast::RangeSelectionKind::IndexedDown) {
-        width = extract_constant_index(right);
-        assert(width > 0);
+        const auto slice_width = try_extract_constant_index(right);
+        if (!slice_width || *slice_width <= 0) {
+          replace_with_zero(expr, "unpacked range width is not a positive integer constant");
+          return;
+        }
+        width = static_cast<SignalWidth>(*slice_width);
         left.visit(*this);
         const ExprId index = expr_stack_.back();
         expr_stack_.pop_back();
@@ -222,7 +268,8 @@ public:
         }
         base = builder_.normalize_index_expr(low, range.left, range.right);
       } else {
-        throw std::logic_error("Unsupported range selection kind");
+        replace_with_zero(expr, "unsupported unpacked range selection kind");
+        return;
       }
       if (width == builder_.get_width(data)) {
         const auto base_value = builder_.try_evaluate(base);
@@ -236,8 +283,14 @@ public:
     }
     const slang::ConstantRange range = type.getFixedRange();
     if (kind == slang::ast::RangeSelectionKind::Simple) {
-      const BitIndex left_sw = extract_constant_index(left);
-      const BitIndex right_sw = extract_constant_index(right);
+      const auto left_index = try_extract_constant_index(left);
+      const auto right_index = try_extract_constant_index(right);
+      if (!left_index || !right_index) {
+        replace_with_zero(expr, "packed range bounds are not representable integer constants");
+        return;
+      }
+      const BitIndex left_sw = *left_index;
+      const BitIndex right_sw = *right_index;
       const BitIndex left_pos = builder_.normalize_index(left_sw, range.left, range.right);
       const BitIndex right_pos = builder_.normalize_index(right_sw, range.left, range.right);
       const SignalWidth data_width = builder_.get_width(data);
@@ -251,15 +304,13 @@ public:
       }
     } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
                kind == slang::ast::RangeSelectionKind::IndexedDown) {
-      const BitIndex width = extract_constant_index(right);
-      assert(width >= 0);
       left.visit(*this);
       const ExprId base = expr_stack_.back();
       expr_stack_.pop_back();
       const bool dir = (kind == slang::ast::RangeSelectionKind::IndexedUp);
       SignalWidth selected_width;
       bool selected_sign;
-      get_width_sign(*expr.type, selected_width, selected_sign);
+      get_width_sign(*expr.type, selected_width, selected_sign, context_.diagnostics);
       const SignalWidth data_width = builder_.get_width(data);
       ExprId low = base;
       if (selected_width > 1) {
@@ -286,7 +337,7 @@ public:
         expr_stack_.push_back(builder_.create_range(data, pos, selected_width, selected_sign));
       }
     } else {
-      throw std::logic_error("Unsupported range selection kind");
+      replace_with_zero(expr, "unsupported packed range selection kind");
     }
   }
 
@@ -303,16 +354,21 @@ public:
   }
 
   void handle(const slang::ast::ReplicationExpression &expr) {
-    const BitIndex rep = extract_constant_index(expr.count());
-    if (rep < 0) {
-      throw std::logic_error("Negative replication count");
+    const auto rep = try_extract_constant_index(expr.count());
+    if (!rep) {
+      replace_with_zero(expr, "replication count is not a representable integer constant");
+      return;
+    }
+    if (*rep < 0) {
+      replace_with_zero(expr, "negative replication count");
+      return;
     }
     expr.concat().visit(*this);
     ExprId body = expr_stack_.back();
     expr_stack_.pop_back();
     std::vector<ExprId> operands;
-    operands.reserve(rep);
-    for (size_t i = 0; i < static_cast<size_t>(rep); ++i) {
+    operands.reserve(*rep);
+    for (size_t i = 0; i < static_cast<size_t>(*rep); ++i) {
       operands.push_back(body);
     }
     expr_stack_.push_back(builder_.create_concat(std::move(operands), expr_sign(expr)));
@@ -320,7 +376,8 @@ public:
 
   void handle(const slang::ast::ConditionalExpression &expr) {
     if (expr.conditions.size() != 1 || expr.conditions[0].pattern != nullptr) {
-      throw std::logic_error("Unsupported conditional expression with pattern chain");
+      replace_with_zero(expr, "unsupported conditional expression with pattern chain");
+      return;
     }
     const size_t index = expr_stack_.size();
     this->visitDefault(expr);
@@ -407,8 +464,9 @@ public:
       id = builder_.create_ge(lhs, rhs);
       break;
     default:
-      throw std::logic_error(std::string("Unhandled binary operator: ") +
-                             std::string(slang::ast::OpInfo::getText(expr.op)));
+      replace_with_zero(expr, "unhandled binary operator: " +
+                                  std::string(slang::ast::OpInfo::getText(expr.op)));
+      return;
     }
     assert(id != kInvalidExprId);
     expr_stack_.push_back(id);
@@ -458,7 +516,8 @@ public:
     case slang::ast::UnaryOperator::Predecrement:
     case slang::ast::UnaryOperator::Postincrement:
     case slang::ast::UnaryOperator::Postdecrement:
-      throw std::logic_error("inc/dec unary operators are not yet supported");
+      replace_with_zero(expr, "inc/dec unary operators are not yet supported");
+      return;
     }
     assert(id != kInvalidExprId);
     expr_stack_.push_back(id);

@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
       return 2;
     }
 
-    abys::ir::VerilogEmitter emitter(result.design, naming);
+    abys::ir::VerilogEmitter emitter(result.design, diagnostics, naming);
     if (out_path) {
       std::ofstream output_stream(*out_path);
       if (!output_stream) {

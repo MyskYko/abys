@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "abys/infra/diagnostics.h"
 #include "abys/infra/naming.h"
 #include "abys/ir/tig.h"
 
@@ -13,7 +14,7 @@ namespace abys::ir {
 
 class VerilogEmitter {
 public:
-  VerilogEmitter(const Tig &design, const NamingOptions &naming);
+  VerilogEmitter(const Tig &design, Diagnostics &diagnostics, const NamingOptions &naming);
   void emit(std::ostream &os) const;
   // std::string emit_to_string(const Design& design) const;
 
@@ -25,6 +26,7 @@ private:
   static constexpr bool kUsePartialAssignmentForMaskedAssign = true;
 
   const Tig &design_;
+  Diagnostics &diagnostics_;
   const NamingOptions &naming_;
 
   void emit_module(const Module &module, std::ostream &os) const;

@@ -1,7 +1,6 @@
 #include <cassert>
 #include <map>
 #include <sstream>
-#include <stdexcept>
 #include <unordered_set>
 #include <vector>
 
@@ -9,8 +8,9 @@
 
 namespace abys::ir {
 
-VerilogEmitter::VerilogEmitter(const Tig &design, const NamingOptions &naming)
-    : design_(design), naming_(naming) {}
+VerilogEmitter::VerilogEmitter(const Tig &design, Diagnostics &diagnostics,
+                               const NamingOptions &naming)
+    : design_(design), diagnostics_(diagnostics), naming_(naming) {}
 
 void VerilogEmitter::emit(std::ostream &os) const {
   bool first = true;
@@ -184,7 +184,7 @@ void VerilogEmitter::emit_combinational(const Module &module, std::ostream &os) 
 }
 
 void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) const {
-  auto edge_to_string = [](EdgeKind edge) -> const char * {
+  auto edge_to_string = [&](EdgeKind edge) -> const char * {
     switch (edge) {
     case EdgeKind::kPosedge:
       return "posedge";
@@ -194,7 +194,8 @@ void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) con
       return "edge";
     case EdgeKind::kNone:
     default:
-      throw std::logic_error("Invalid edge kind for sequential emission");
+      diagnostics_.error(DiagnosticId::kEmitterInvalidEdgeTreatedAsPosedge);
+      return "posedge";
     }
   };
   std::map<Tig::NodeId, std::string> merged_ffs;
@@ -378,6 +379,12 @@ void VerilogEmitter::emit_expr_unpacked(
                          assign_os, indent, assumptions);
     }
     break;
+  case ExprGraph::Op::kGather:
+    for (size_t i = 0; i < node.operands.size(); ++i) {
+      emit_expr_unpacked(lhs + "[" + std::to_string(i) + "]", is_nonblocking, false, expr_graph,
+                         node.operands[i], names, decl_os, os, assign_os, indent, assumptions);
+    }
+    break;
   case ExprGraph::Op::kUnpackedAssign: {
     const ExprId next = node.operands[0];
     const ExprId base = node.operands[1];
@@ -534,9 +541,7 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     return it->second;
   }
 
-  auto temp_name = [&]() {
-    return naming_.emitter_temporary_signal_prefix + std::to_string(id);
-  };
+  auto temp_name = [&]() { return naming_.emitter_temporary_signal_prefix + std::to_string(id); };
   auto declare_temp = [&](const ExprGraph::Node &node, std::string_view name) {
     decl_os << indent << "logic ";
     if (node.sign) {
@@ -598,7 +603,9 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
         return kv.first;
       }
     }
-    throw std::logic_error("Input expression has no registered name");
+    diagnostics_.error(DiagnosticId::kEmitterMissingExpressionValueReplacedWithZero, "input name");
+    names[id] = "1'b0";
+    return names[id];
   case ExprGraph::Op::kConst:
     for (const auto &c : expr_graph.constants) {
       if (c.id == id) {
@@ -606,7 +613,10 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
         return c.value;
       }
     }
-    throw std::logic_error("Constant expression has no registered value");
+    diagnostics_.error(DiagnosticId::kEmitterMissingExpressionValueReplacedWithZero,
+                       "constant value");
+    names[id] = "1'b0";
+    return names[id];
   case ExprGraph::Op::kLogicalNot: {
     return emit_unary("!");
   }
@@ -884,10 +894,11 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     return name;
   }
   default:
-    throw std::logic_error("Unsupported expression in new Verilog emitter");
+    diagnostics_.error(DiagnosticId::kEmitterUnsupportedExpressionReplacedWithZero);
+    names[id] = "1'b0";
+    return names[id];
   }
 }
-
 
 bool VerilogEmitter::can_emit_direct_range_base(const ExprGraph &expr_graph, ExprId id) {
   if (id == kInvalidExprId) {
@@ -896,7 +907,6 @@ bool VerilogEmitter::can_emit_direct_range_base(const ExprGraph &expr_graph, Exp
   const auto &node = expr_graph.nodes[id];
   return node.op == ExprGraph::Op::kInput || node.op == ExprGraph::Op::kUnpackedSelect;
 }
-
 
 void VerilogEmitter::emit_module_footer(std::ostream &os) {
   os << "endmodule\n";

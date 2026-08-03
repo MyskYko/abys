@@ -8,7 +8,10 @@
 
 namespace abys {
 
-enum class DiagnosticLevel : uint8_t { kWarning };
+enum class DiagnosticLevel : uint8_t {
+  kWarning,
+  kError,
+};
 
 enum class DiagnosticId : uint16_t {
   kLoweringUnresolvedSignalInput,
@@ -21,6 +24,24 @@ enum class DiagnosticId : uint16_t {
   kLoweringProceduralBlockIgnored,
   kLoweringTaskIgnored,
   kLoweringLargeCompileTimeLoop,
+  kLoweringUnsupportedAstNode,
+  kLoweringUnsupportedExpressionReplacedWithZero,
+  kLoweringUnsupportedStatementIgnored,
+  kLoweringUnsupportedTimingControlIgnored,
+  kLoweringUnsupportedPortIgnored,
+  kLoweringUnsupportedDefinitionIgnored,
+  kLoweringUnsupportedInstanceIgnored,
+  kLoweringUnsupportedInstanceConnectionIgnored,
+  kLoweringUnsupportedSubroutineFormalTreatedAsInput,
+  kLoweringUnsupportedAssignmentIgnored,
+  kLoweringSubroutineLimitExceeded,
+  kLoweringUnsupportedTypeReplacedWithBit,
+  kLoweringInvalidFfTreatedAsCombinational,
+  kLoweringDuplicateSubroutineIgnored,
+  kLoweringUndecidedProcessTreatedAsCombOrLatch,
+  kEmitterInvalidEdgeTreatedAsPosedge,
+  kEmitterMissingExpressionValueReplacedWithZero,
+  kEmitterUnsupportedExpressionReplacedWithZero,
   kFrontendUnhandledSynthesisAttribute,
   kFrontendUnhandledSynthesisComment,
 };
@@ -40,6 +61,7 @@ public:
   explicit Diagnostics(std::ostream &output);
 
   void warning(DiagnosticId id, std::string detail = {});
+  void error(DiagnosticId id, std::string detail = {});
 
 private:
   static std::string format(const Entry &entry);

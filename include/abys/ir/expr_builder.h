@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "abys/infra/diagnostics.h"
 #include "abys/ir/expr.h"
 #include "abys/util/string_map.h"
 
@@ -13,7 +14,7 @@ namespace abys::ir {
 
 class ExprBuilder {
 public:
-  explicit ExprBuilder(ExprGraph &graph);
+  ExprBuilder(ExprGraph &graph, Diagnostics &diagnostics);
   explicit ExprBuilder(const ExprBuilder &parent);
 
   static ExprId get_constant_zero();
@@ -117,7 +118,7 @@ public:
   ExprId get_current_value(std::string_view name) const;
   void update_value(std::string name, ExprId id);
 
-  void get_input_spec(ExprId id, ExprId &input_id, std::string &name, SignalWidth &width,
+  bool get_input_spec(ExprId id, ExprId &input_id, std::string &name, SignalWidth &width,
                       bool &sign) const;
   bool check_dependency(ExprId id, ExprId target) const;
 
@@ -126,6 +127,7 @@ public:
 
 private:
   ExprGraph &graph_;
+  Diagnostics &diagnostics_;
   abys::util::StringMap<ExprId> name_map_;
 
   ExprId create_node();

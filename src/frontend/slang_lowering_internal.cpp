@@ -8,7 +8,8 @@ SubrId SlangLoweringContext::get_or_create_subr_id(const slang::ast::SubroutineS
     return it->second;
   }
   if (subr_ids.size() >= kInvalidSubrId) {
-    throw std::overflow_error("Too many subroutines");
+    diagnostics.error(DiagnosticId::kLoweringSubroutineLimitExceeded);
+    return kInvalidSubrId;
   }
   const SubrId id = static_cast<SubrId>(subr_ids.size());
   subr_ids.emplace(&symbol, id);
@@ -88,24 +89,23 @@ extract_named_value(const slang::ast::Expression &expr,
   return lower_symbol_name(named.symbol, special_symbols);
 }
 
-BitIndex extract_constant_index(const slang::ast::Expression &expr) {
+std::optional<BitIndex> try_extract_constant_index(const slang::ast::Expression &expr) {
   const auto *const constant_value = expr.getConstant();
   if (!constant_value || !*constant_value || !constant_value->isInteger()) {
-    throw std::logic_error("Expected integer constant");
+    return std::nullopt;
   }
-  const slang::SVInt &integer_value = constant_value->integer();
-  const auto index = integer_value.as<int64_t>();
-  if (!index) {
-    throw std::logic_error("SVInt too wide for int64");
-  }
-  return *index;
+  return constant_value->integer().as<int64_t>();
 }
 
-void get_width_sign(const slang::ast::Type &type, SignalWidth &width, bool &sign) {
+void get_width_sign(const slang::ast::Type &type, SignalWidth &width, bool &sign,
+                    Diagnostics &diagnostics) {
   if (type.isUnpackedArray()) {
     const auto &ct = type.getCanonicalType();
     if (ct.kind != slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
-      throw std::logic_error("Unsupported dynamic size unpacked array");
+      diagnostics.error(DiagnosticId::kLoweringUnsupportedTypeReplacedWithBit);
+      width = 1;
+      sign = false;
+      return;
     }
     const auto &arr = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
     const auto range = arr.range;
@@ -118,7 +118,7 @@ void get_width_sign(const slang::ast::Type &type, SignalWidth &width, bool &sign
   }
 }
 
-SignalType get_signal_type(const slang::ast::Type &type) {
+SignalType get_signal_type(const slang::ast::Type &type, Diagnostics &diagnostics) {
   SignalType signal_type;
   const slang::ast::Type *element_type = &type.getCanonicalType();
   while (element_type->kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
@@ -127,7 +127,8 @@ SignalType get_signal_type(const slang::ast::Type &type) {
     element_type = &array_type.elementType.getCanonicalType();
   }
   if (element_type->isUnpackedArray()) {
-    throw std::logic_error("Unsupported dynamic size unpacked array");
+    diagnostics.error(DiagnosticId::kLoweringUnsupportedTypeReplacedWithBit);
+    return {{}, 1, false};
   }
   signal_type.width = element_type->getBitstreamWidth();
   signal_type.sign = element_type->isSigned();

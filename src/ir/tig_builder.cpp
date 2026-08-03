@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -280,18 +279,21 @@ void TigBuilder::insert_ffs(ModuleId module_id) {
   std::sort(pending_ffs.begin(), pending_ffs.end(),
             [](const PendingFf &a, const PendingFf &b) { return a.name < b.name; });
   for (size_t begin = 0; begin < pending_ffs.size();) {
+    size_t end = begin + 1;
+    while (end < pending_ffs.size() && pending_ffs[end].name == pending_ffs[begin].name) {
+      ++end;
+    }
     auto it = signal_map.find(pending_ffs[begin].name);
     if (it == signal_map.end()) {
-      throw std::logic_error("insert_ffs: signal not found: " + pending_ffs[begin].name);
+      diagnostics_.error(DiagnosticId::kLoweringInvalidFfTreatedAsCombinational,
+                         pending_ffs[begin].name + " (signal not found)");
+      begin = end;
+      continue;
     }
     const auto spec = get_signal_spec(module_id, it->second);
     assert(module.nodes[it->second.node_id].kind == NodeKind::kOp ||
            module.nodes[it->second.node_id].kind == NodeKind::kMerge);
     module.nodes[it->second.node_id].outputs[it->second.port_idx].name.clear();
-    size_t end = begin + 1;
-    while (end < pending_ffs.size() && pending_ffs[end].name == pending_ffs[begin].name) {
-      ++end;
-    }
     if (begin + 1 == end) {
       it->second = create_ff(pending_ffs[begin], it->second, spec, true);
       begin = end;
@@ -379,16 +381,17 @@ void TigBuilder::wire_connections(ModuleId module_id) {
   }
 }
 
-ExprGraph &TigBuilder::create_subroutine(SubrId id, std::string name) {
+ExprGraph *TigBuilder::create_subroutine(SubrId id, std::string name) {
   if (id >= design_.subroutines.size()) {
     design_.subroutines.resize(static_cast<size_t>(id) + 1);
   }
   Tig::Subroutine &subr = design_.subroutines[id];
   if (subr.expr_root != kInvalidExprId) {
-    throw std::logic_error("Duplicate subroutine definition: " + name);
+    diagnostics_.error(DiagnosticId::kLoweringDuplicateSubroutineIgnored, name);
+    return nullptr;
   }
   subr.name = std::move(name);
-  return subr.expr_graph;
+  return &subr.expr_graph;
 }
 
 void TigBuilder::add_subroutine_input(SubrId id, std::string name, SignalWidth width, bool sign,
@@ -407,26 +410,41 @@ void TigBuilder::flatten_calls() {
   for (auto &module : design_.modules) {
     for (auto &node : module.nodes) {
       ExprGraph &expr_graph = node.expr_graph;
+      auto replace_call_with_zero = [&](ExprId call_id, std::string detail) {
+        diagnostics_.error(DiagnosticId::kLoweringUnsupportedExpressionReplacedWithZero,
+                           std::move(detail));
+        auto &call_node = expr_graph.nodes[call_id];
+        call_node.op = ExprGraph::Op::kConvert;
+        call_node.operands = {ExprGraph::constant_zero};
+      };
       for (size_t i = 0; i < expr_graph.calls.size(); ++i) {
         const SubrId subr_id = expr_graph.calls[i].subr_id;
+        const ExprId call_id = expr_graph.calls[i].id;
         if (subr_id >= design_.subroutines.size() ||
             design_.subroutines[subr_id].expr_root == kInvalidExprId) {
-          throw std::logic_error("Unknown subroutine: " + expr_graph.calls[i].name);
+          replace_call_with_zero(call_id, "unknown subroutine: " + expr_graph.calls[i].name);
+          continue;
         }
         const Tig::Subroutine &subr = design_.subroutines[subr_id];
-        ExprId call_id = expr_graph.calls[i].id;
         if (expr_graph.nodes[call_id].operands.size() != subr.inputs.size()) {
-          throw std::logic_error("Call arity mismatch: " + expr_graph.calls[i].name);
+          replace_call_with_zero(call_id, "call arity mismatch: " + expr_graph.calls[i].name);
+          continue;
         }
         std::unordered_map<ExprId, ExprId> id_map;
         id_map.reserve(subr.expr_graph.nodes.size() + 1);
         id_map.emplace(kInvalidExprId, kInvalidExprId);
+        bool call_valid = true;
         for (size_t j = 0; j < subr.inputs.size(); ++j) {
           const auto input_it = subr.expr_graph.inputs.find(subr.inputs[j].name);
           if (input_it == subr.expr_graph.inputs.end()) {
-            throw std::logic_error("Subroutine input not found: " + subr.inputs[j].name);
+            replace_call_with_zero(call_id, "subroutine input not found: " + subr.inputs[j].name);
+            call_valid = false;
+            break;
           }
           id_map.emplace(input_it->second, expr_graph.nodes[call_id].operands[j]);
+        }
+        if (!call_valid) {
+          continue;
         }
         for (const auto &constant : subr.expr_graph.constants) {
           if (constant.id == ExprGraph::constant_zero) {
@@ -456,9 +474,15 @@ void TigBuilder::flatten_calls() {
           for (ExprId sop : src.operands) {
             auto mit = id_map.find(sop);
             if (mit == id_map.end()) {
-              throw std::logic_error("Subroutine graph not topologically ordered");
+              replace_call_with_zero(call_id,
+                                     "subroutine graph is not topologically ordered: " + subr.name);
+              call_valid = false;
+              break;
             }
             new_ops.push_back(mit->second);
+          }
+          if (!call_valid) {
+            break;
           }
           const ExprId dst_id = static_cast<ExprId>(expr_graph.nodes.size());
           expr_graph.nodes.push_back(src);
@@ -473,9 +497,13 @@ void TigBuilder::flatten_calls() {
             }
           }
         }
+        if (!call_valid) {
+          continue;
+        }
         auto rit = id_map.find(subr.expr_root);
         if (rit == id_map.end()) {
-          throw std::logic_error("Failed to map subroutine root: " + subr.name);
+          replace_call_with_zero(call_id, "failed to map subroutine root: " + subr.name);
+          continue;
         }
         const ExprId inlined_root = rit->second;
         auto &call_node = expr_graph.nodes[call_id];

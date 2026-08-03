@@ -3,17 +3,17 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
 #include <utility>
 
 #include "abys/ir/expr_builder.h"
 
 namespace abys::ir {
 
-ExprBuilder::ExprBuilder(ExprGraph &graph) : graph_(graph) {}
+ExprBuilder::ExprBuilder(ExprGraph &graph, Diagnostics &diagnostics)
+    : graph_(graph), diagnostics_(diagnostics) {}
 
 ExprBuilder::ExprBuilder(const ExprBuilder &parent)
-    : graph_(parent.graph_), name_map_(parent.name_map_) {}
+    : graph_(parent.graph_), diagnostics_(parent.diagnostics_), name_map_(parent.name_map_) {}
 
 ExprId ExprBuilder::create_node() {
   const ExprId id = static_cast<ExprId>(graph_.nodes.size());
@@ -294,7 +294,9 @@ ExprId ExprBuilder::create_mux(ExprId cond, ExprId then, ExprId else_id) {
     node.width = else_node.width;
     node.sign = else_node.sign;
   } else {
-    throw std::logic_error("Mux requires at least one valid data operand");
+    diagnostics_.error(DiagnosticId::kLoweringUnsupportedExpressionReplacedWithZero,
+                       "mux has no valid data operand");
+    return ExprGraph::constant_zero;
   }
   node.operands = {cond, then, else_id};
   return id;
@@ -603,7 +605,7 @@ void ExprBuilder::update_value(std::string name, ExprId id) {
   name_map_.insert_or_assign(std::move(name), id);
 }
 
-void ExprBuilder::get_input_spec(ExprId id, ExprId &input_id, std::string &name, SignalWidth &width,
+bool ExprBuilder::get_input_spec(ExprId id, ExprId &input_id, std::string &name, SignalWidth &width,
                                  bool &sign) const {
   input_id = id;
   const auto &node0 = graph_.nodes[input_id];
@@ -612,7 +614,7 @@ void ExprBuilder::get_input_spec(ExprId id, ExprId &input_id, std::string &name,
   }
   const auto &node = graph_.nodes[input_id];
   if (node.op != ExprGraph::Op::kInput) {
-    throw std::logic_error("Cannot obtain input spec of non-input expression");
+    return false;
   }
   bool found = false;
   for (const auto &kv : graph_.inputs) {
@@ -622,9 +624,12 @@ void ExprBuilder::get_input_spec(ExprId id, ExprId &input_id, std::string &name,
       break;
     }
   }
-  assert(found);
+  if (!found) {
+    return false;
+  }
   width = node.width;
   sign = node.sign;
+  return true;
 }
 
 bool ExprBuilder::check_dependency_rec(ExprId id, ExprId target,

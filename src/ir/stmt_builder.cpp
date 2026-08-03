@@ -1,5 +1,4 @@
 #include <cassert>
-#include <stdexcept>
 #include <utility>
 
 #include "abys/ir/stmt_builder.h"
@@ -8,7 +7,7 @@ namespace abys::ir {
 
 StmtBuilder::StmtBuilder(ExprGraph &expr_graph, Diagnostics &diagnostics)
     : expr_graph_(expr_graph), diagnostics_(diagnostics) {
-  contexts_.emplace_back(Context({ExprBuilder(expr_graph), {}, {}, {}, {}, {}}));
+  contexts_.emplace_back(Context({ExprBuilder(expr_graph, diagnostics), {}, {}, {}, {}, {}}));
 }
 
 ExprBuilder &StmtBuilder::get_expr_builder() {
@@ -97,7 +96,9 @@ void StmtBuilder::add_timing(ExprId expr_id, ExprId iff_id, bool posedge, bool n
     set_comb_or_latch();
   } else {
     if (!is_undecided() && !is_ff()) {
-      throw std::logic_error("Edge timing in comb/latch block");
+      diagnostics_.error(DiagnosticId::kLoweringUnsupportedTimingControlIgnored,
+                         "edge event in combinational or latch block");
+      return;
     }
     set_ff();
   }
@@ -140,9 +141,10 @@ std::vector<size_t> StmtBuilder::collect_last_output_indices(Context &ctx) const
     if (it != last_index.end()) {
       if (ctx.output_nonblocking[it->second] != ctx.output_nonblocking[i]) {
         if (!is_ff()) {
-          throw std::logic_error("Mixed blocking and nonblocking assignments to " + name);
+          diagnostics_.error(DiagnosticId::kLoweringMixedAssignmentTreatedAsNonblocking, name);
+        } else {
+          diagnostics_.warning(DiagnosticId::kLoweringMixedAssignmentTreatedAsNonblocking, name);
         }
-        diagnostics_.warning(DiagnosticId::kLoweringMixedAssignmentTreatedAsNonblocking, name);
         ctx.output_nonblocking[it->second] = true;
         ctx.output_nonblocking[i] = true;
       }
@@ -209,9 +211,10 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
       new_id = expr_builder.create_mux(cond_id, then_id, else_id);
       if (then_ctx.output_nonblocking[i] != else_ctx.output_nonblocking[it->second]) {
         if (!is_ff()) {
-          throw std::logic_error("Mixed blocking/nonblocking assignments to " + name);
+          diagnostics_.error(DiagnosticId::kLoweringMixedAssignmentTreatedAsNonblocking, name);
+        } else {
+          diagnostics_.warning(DiagnosticId::kLoweringMixedAssignmentTreatedAsNonblocking, name);
         }
-        diagnostics_.warning(DiagnosticId::kLoweringMixedAssignmentTreatedAsNonblocking, name);
         then_ctx.output_nonblocking[i] = true;
         else_ctx.output_nonblocking[it->second] = true;
       }
@@ -352,27 +355,38 @@ void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case
   }
 }
 
-void StmtBuilder::get_timing_spec(const std::vector<std::pair<std::string, ExprId>> &outputs,
+bool StmtBuilder::get_timing_spec(const std::vector<std::pair<std::string, ExprId>> &outputs,
                                   std::string &clk_name, SignalWidth &clk_width, bool &clk_sign,
                                   EdgeKind &clk_edge, std::string &rst_name, SignalWidth &rst_width,
                                   bool &rst_sign, EdgeKind &rst_edge) const {
   if (timing_events_.size() != 1 && timing_events_.size() != 2) {
-    throw std::logic_error("FF requires one or two timing events");
+    diagnostics_.error(DiagnosticId::kLoweringInvalidFfTreatedAsCombinational,
+                       "expected one or two timing events");
+    return false;
   }
   const ExprBuilder &expr_builder = contexts_.back().expr_builder;
   auto get_input_spec = [&](int index, ExprId &input_id, std::string &name, SignalWidth &width,
-                            bool &sign, EdgeKind &edge) {
+                            bool &sign, EdgeKind &edge) -> bool {
     const auto &ev = timing_events_[index];
     if (ev.edge == EdgeKind::kNone) {
-      throw std::logic_error("FF timing must be edge-triggered");
+      diagnostics_.error(DiagnosticId::kLoweringInvalidFfTreatedAsCombinational,
+                         "timing event is not edge-triggered");
+      return false;
     }
     edge = ev.edge;
-    expr_builder.get_input_spec(ev.expr_id, input_id, name, width, sign);
+    if (!expr_builder.get_input_spec(ev.expr_id, input_id, name, width, sign)) {
+      diagnostics_.error(DiagnosticId::kLoweringInvalidFfTreatedAsCombinational,
+                         "timing event is not a named input");
+      return false;
+    }
+    return true;
   };
   if (timing_events_.size() == 1) {
     ExprId input_id;
-    get_input_spec(0, input_id, clk_name, clk_width, clk_sign, clk_edge);
-    return;
+    if (!get_input_spec(0, input_id, clk_name, clk_width, clk_sign, clk_edge)) {
+      return false;
+    }
+    return true;
   }
   for (int i = 0; i < 2; ++i) {
     // TODO: require the inferred reset signal to be used only as the reset condition.
@@ -381,7 +395,9 @@ void StmtBuilder::get_timing_spec(const std::vector<std::pair<std::string, ExprI
     SignalWidth width;
     bool sign;
     EdgeKind edge;
-    get_input_spec(i, input_id, name, width, sign, edge);
+    if (!get_input_spec(i, input_id, name, width, sign, edge)) {
+      return false;
+    }
     bool is_used = false;
     for (const auto &kv : outputs) {
       if (expr_builder.check_dependency(kv.second, input_id)) {
@@ -391,7 +407,9 @@ void StmtBuilder::get_timing_spec(const std::vector<std::pair<std::string, ExprI
     }
     if (is_used) {
       if (!rst_name.empty()) {
-        throw std::logic_error("Ambiguous reset inference");
+        diagnostics_.error(DiagnosticId::kLoweringInvalidFfTreatedAsCombinational,
+                           "ambiguous reset inference");
+        return false;
       }
       rst_name = name;
       rst_width = width;
@@ -399,7 +417,9 @@ void StmtBuilder::get_timing_spec(const std::vector<std::pair<std::string, ExprI
       rst_edge = edge;
     } else {
       if (!clk_name.empty()) {
-        throw std::logic_error("Ambiguous clock inference");
+        diagnostics_.error(DiagnosticId::kLoweringInvalidFfTreatedAsCombinational,
+                           "ambiguous clock inference");
+        return false;
       }
       clk_name = name;
       clk_width = width;
@@ -408,6 +428,7 @@ void StmtBuilder::get_timing_spec(const std::vector<std::pair<std::string, ExprI
     }
   }
   // TODO: handle iff (enable) too
+  return true;
 }
 
 } // namespace abys::ir
