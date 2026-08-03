@@ -376,14 +376,28 @@ void TigBuilder::wire_connections(ModuleId module_id) {
   }
 }
 
-void TigBuilder::add_subroutine(SubroutineId id, Tig::Subroutine subr) {
+ExprGraph &TigBuilder::create_subroutine(SubrId id, std::string name) {
   if (id >= design_.subroutines.size()) {
     design_.subroutines.resize(static_cast<size_t>(id) + 1);
   }
-  if (design_.subroutines[id].expr_root != kInvalidExprId) {
-    throw std::logic_error("Duplicate subroutine definition: " + subr.name);
+  Tig::Subroutine &subr = design_.subroutines[id];
+  if (subr.expr_root != kInvalidExprId) {
+    throw std::logic_error("Duplicate subroutine definition: " + name);
   }
-  design_.subroutines[id] = std::move(subr);
+  subr.name = std::move(name);
+  return subr.expr_graph;
+}
+
+void TigBuilder::add_subroutine_input(SubrId id, std::string name, SignalWidth width, bool sign,
+                                      std::vector<SignalWidth> unpacked_dims) {
+  assert(id < design_.subroutines.size());
+  design_.subroutines[id].inputs.push_back(
+      {std::move(name), std::move(unpacked_dims), width, sign});
+}
+
+void TigBuilder::set_subroutine_root(SubrId id, ExprId root) {
+  assert(id < design_.subroutines.size());
+  design_.subroutines[id].expr_root = root;
 }
 
 void TigBuilder::flatten_calls() {
@@ -391,12 +405,12 @@ void TigBuilder::flatten_calls() {
     for (auto &node : module.nodes) {
       ExprGraph &expr_graph = node.expr_graph;
       for (size_t i = 0; i < expr_graph.calls.size(); ++i) {
-        const SubroutineId subroutine_id = expr_graph.calls[i].subroutine_id;
-        if (subroutine_id >= design_.subroutines.size() ||
-            design_.subroutines[subroutine_id].expr_root == kInvalidExprId) {
+        const SubrId subr_id = expr_graph.calls[i].subr_id;
+        if (subr_id >= design_.subroutines.size() ||
+            design_.subroutines[subr_id].expr_root == kInvalidExprId) {
           throw std::logic_error("Unknown subroutine: " + expr_graph.calls[i].name);
         }
-        const Tig::Subroutine &subr = design_.subroutines[subroutine_id];
+        const Tig::Subroutine &subr = design_.subroutines[subr_id];
         ExprId call_id = expr_graph.calls[i].id;
         if (expr_graph.nodes[call_id].operands.size() != subr.inputs.size()) {
           throw std::logic_error("Call arity mismatch: " + expr_graph.calls[i].name);
@@ -450,7 +464,7 @@ void TigBuilder::flatten_calls() {
           if (src.op == ExprGraph::Op::kCall) {
             for (const auto &src_call : subr.expr_graph.calls) {
               if (src_call.id == src_id) {
-                expr_graph.calls.push_back({dst_id, src_call.subroutine_id, src_call.name});
+                expr_graph.calls.push_back({dst_id, src_call.subr_id, src_call.name});
                 break;
               }
             }

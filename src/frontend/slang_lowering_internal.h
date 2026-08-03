@@ -43,9 +43,9 @@ struct SlangLoweringContext {
 
   Diagnostics &diagnostics;
   std::unordered_map<const slang::ast::Symbol *, std::string> special_symbols;
-  std::unordered_map<const slang::ast::SubroutineSymbol *, SubroutineId> subroutine_ids;
+  std::unordered_map<const slang::ast::SubroutineSymbol *, SubrId> subr_ids;
 
-  SubroutineId get_or_create_subroutine_id(const slang::ast::SubroutineSymbol &symbol);
+  SubrId get_or_create_subr_id(const slang::ast::SubroutineSymbol &symbol);
 };
 
 struct SignalType {

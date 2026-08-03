@@ -68,7 +68,7 @@ struct ExprGraph {
 
   struct Call {
     ExprId id = kInvalidExprId;
-    SubroutineId subroutine_id = kInvalidSubroutineId;
+    SubrId subr_id = kInvalidSubrId;
     std::string name; // to debug
   };
 

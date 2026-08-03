@@ -428,21 +428,18 @@ public:
       context_.diagnostics.warning(DiagnosticId::kLoweringTaskIgnored, std::string(symbol.name));
       return;
     }
-    // TODO: it is better to remove dependency on tig structure; use builder api to create a
-    // subroutine
-    Tig::Subroutine subr;
-    subr.name = std::string(symbol.name);
+    const SubrId subr_id = context_.get_or_create_subr_id(symbol);
+    ExprGraph &expr_graph = builder_.create_subroutine(subr_id, std::string(symbol.name));
     for (const auto *arg : symbol.getArguments()) {
-      // TODO: handle packed/unpacked array
       if (arg->direction != slang::ast::ArgumentDirection::In) {
         throw std::logic_error("Only input formals are supported in function lowering: " +
                                std::string(symbol.name) + "." + std::string(arg->name));
       }
-      const auto &type = arg->getType();
-      subr.inputs.emplace_back(
-          Tig::Subroutine::Port{std::string(arg->name), type.getBitstreamWidth(), type.isSigned()});
+      SignalType signal_type = get_signal_type(arg->getType());
+      builder_.add_subroutine_input(subr_id, std::string(arg->name), signal_type.width,
+                                    signal_type.sign, std::move(signal_type.unpacked_dims));
     }
-    StmtBuilder stmt_builder(subr.expr_graph, context_.diagnostics);
+    StmtBuilder stmt_builder(expr_graph, context_.diagnostics);
     const auto &return_type = symbol.getReturnType();
     const SignalWidth return_width = return_type.getBitstreamWidth();
     const std::string return_unknown(return_width, 'x');
@@ -455,8 +452,7 @@ public:
     if (ret == kInvalidExprId) {
       throw std::logic_error("Function has no return assignment: " + std::string(symbol.name));
     }
-    subr.expr_root = ret;
-    builder_.add_subroutine(context_.get_or_create_subroutine_id(symbol), std::move(subr));
+    builder_.set_subroutine_root(subr_id, ret);
   }
 
   void handle(const slang::ast::StatementBlockSymbol &symbol) {

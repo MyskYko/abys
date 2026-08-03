@@ -129,8 +129,8 @@ public:
     }
     std::string name(expr.getSubroutineName());
     const auto *subroutine = std::get<const slang::ast::SubroutineSymbol *>(expr.subroutine);
-    const SubroutineId subroutine_id = context_.get_or_create_subroutine_id(*subroutine);
-    const ExprId id = builder_.create_call(subroutine_id, std::move(name), std::move(operands),
+    const SubrId subr_id = context_.get_or_create_subr_id(*subroutine);
+    const ExprId id = builder_.create_call(subr_id, std::move(name), std::move(operands),
                                            expr_width(expr), expr_sign(expr));
     expr_stack_.push_back(id);
   }

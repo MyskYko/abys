@@ -17,15 +17,14 @@ struct Tig {
   static constexpr NodeId kInvalidNodeId = std::numeric_limits<NodeId>::max();
   static constexpr ModuleId kInvalidModuleId = std::numeric_limits<ModuleId>::max();
 
+  struct SignalProperties {
+    std::string name;
+    std::vector<SignalWidth> unpacked_dims;
+    SignalWidth width = 0;
+    bool sign = false;
+  };
+
   struct Module {
-
-    struct SignalProperties {
-      std::string name;
-      std::vector<SignalWidth> unpacked_dims;
-      SignalWidth width = 0;
-      bool sign = false;
-    };
-
     struct EdgeRef {
       NodeId node_id = kInvalidNodeId;
       PortIndex port_idx = 0;
@@ -71,13 +70,8 @@ struct Tig {
   };
 
   struct Subroutine {
-    struct Port {
-      std::string name;
-      SignalWidth width = 0;
-      bool sign = false;
-    };
     std::string name; // for debug
-    std::vector<Port> inputs;
+    std::vector<SignalProperties> inputs;
     ExprGraph expr_graph;
     ExprId expr_root = kInvalidExprId;
   };

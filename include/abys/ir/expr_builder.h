@@ -102,7 +102,7 @@ public:
   ExprId create_unpacked_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb,
                                 SignalWidth width, bool sign);
 
-  ExprId create_call(SubroutineId subroutine_id, std::string name, std::vector<ExprId> operands,
+  ExprId create_call(SubrId subr_id, std::string name, std::vector<ExprId> operands,
                      SignalWidth width, bool sign);
 
   ExprId create_both_edge(ExprId operand);

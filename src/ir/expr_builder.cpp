@@ -558,15 +558,15 @@ ExprId ExprBuilder::unpacked_assign_part_select(ExprId next, ExprId base, Signal
   return create_unpacked_assign(next, base_id, width_id, width, sign);
 }
 
-ExprId ExprBuilder::create_call(SubroutineId subroutine_id, std::string name,
-                                std::vector<ExprId> operands, SignalWidth width, bool sign) {
+ExprId ExprBuilder::create_call(SubrId subr_id, std::string name, std::vector<ExprId> operands,
+                                SignalWidth width, bool sign) {
   const ExprId id = create_node();
   auto &node = get_node(id);
   node.op = ExprGraph::Op::kCall;
   node.width = width;
   node.sign = sign;
   node.operands = std::move(operands);
-  graph_.calls.emplace_back(ExprGraph::Call{id, subroutine_id, std::move(name)});
+  graph_.calls.emplace_back(ExprGraph::Call{id, subr_id, std::move(name)});
   return id;
 }
 
