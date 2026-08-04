@@ -603,8 +603,7 @@ TigDumper::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
         return kv.first;
       }
     }
-    diagnostics_.error(DiagnosticId::kEmitterMissingExpressionValueReplacedWithZero, "input name");
-    names[id] = "1'b0";
+    names[id] = "";
     return names[id];
   case ExprGraph::Op::kConst:
     for (const auto &c : expr_graph.constants) {
@@ -617,6 +616,37 @@ TigDumper::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
                        "constant value");
     names[id] = "1'b0";
     return names[id];
+  case ExprGraph::Op::kSequence: {
+    const ExprGraph::Sequence *sequence_properties = nullptr;
+    for (const auto &candidate : expr_graph.sequences) {
+      if (candidate.id == id) {
+        sequence_properties = &candidate;
+        break;
+      }
+    }
+    assert(sequence_properties != nullptr);
+    const std::string name = temp_name();
+    decl_os << indent << "logic ";
+    if (sequence_properties->sign) {
+      decl_os << "signed ";
+    }
+    if (sequence_properties->width > 1) {
+      decl_os << "[" << (sequence_properties->width - 1) << ":0] ";
+    }
+    decl_os << name;
+    for (const SignalWidth dim : sequence_properties->unpacked_dims) {
+      decl_os << " [" << (dim - 1) << ":0]";
+    }
+    decl_os << ";\n";
+    const std::string base = emit_expr_packed(expr_graph, sequence_properties->base, names, decl_os,
+                                              os, indent, assumptions);
+    if (!base.empty()) {
+      os << indent << name << " = " << base << ";\n";
+    }
+    emit_expr_unpacked(name, false, false, expr_graph, id, names, decl_os, os, os, indent,
+                       assumptions);
+    return name;
+  }
   case ExprGraph::Op::kLogicalNot: {
     return emit_unary("!");
   }
@@ -884,7 +914,9 @@ TigDumper::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
         emit_expr_packed(expr_graph, slice_width_id, names, decl_os, os, indent, assumptions);
     const std::string name = temp_name();
     declare_temp(node, name);
-    os << indent << name << " = " << current << ";\n";
+    if (!current.empty()) {
+      os << indent << name << " = " << current << ";\n";
+    }
     os << indent << name << "[" << base;
     if (slice_width_id != ExprGraph::constant_one) {
       os << " +: " << slice_width;

@@ -495,6 +495,15 @@ void TigBuilder::flatten_calls() {
                 break;
               }
             }
+          } else if (src.op == ExprGraph::Op::kSequence) {
+            for (const auto &src_sequence : subr.expr_graph.sequences) {
+              if (src_sequence.id == src_id) {
+                expr_graph.sequences.push_back({dst_id, id_map.at(src_sequence.base),
+                                                src_sequence.unpacked_dims, src_sequence.width,
+                                                src_sequence.sign});
+                break;
+              }
+            }
           }
         }
         if (!call_valid) {

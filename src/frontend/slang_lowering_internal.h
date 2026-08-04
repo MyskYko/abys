@@ -168,7 +168,15 @@ void lower_lhs_assignment(const slang::ast::Expression &whole_lhs, ExprId rhs_id
             expr_builder.get_node(current_id).op == ExprGraph::Op::kSequence) {
           sequence_id = current_id;
         }
-        return expr_builder.create_sequence(sequence_id, expr_id);
+        if (sequence_id != kInvalidExprId) {
+          return expr_builder.create_sequence(sequence_id, expr_id);
+        }
+        const SignalType signal_type = get_signal_type(*lhs.type, context.diagnostics);
+        const ExprId sequence_base = expr_builder.find_or_create_input(
+            extract_named_value(lhs, special_symbols), expr_builder.get_width(expr_id),
+            expr_builder.get_sign(expr_id));
+        return expr_builder.create_sequence(expr_id, sequence_base, signal_type.unpacked_dims,
+                                            signal_type.width, signal_type.sign);
       }
       return finalize_packed_update(lhs, expr_id, base_id, [&](SignalWidth width, bool sign) {
         if (current_id != kInvalidExprId) {

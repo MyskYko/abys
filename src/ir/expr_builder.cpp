@@ -467,26 +467,74 @@ ExprId ExprBuilder::create_gather(std::vector<ExprId> operands) {
   node.operands = std::move(operands);
   return id;
 }
-ExprId ExprBuilder::create_sequence(ExprId current, ExprId next) {
+ExprId ExprBuilder::create_sequence(ExprId next, ExprId base,
+                                    std::vector<SignalWidth> unpacked_dims, SignalWidth width,
+                                    bool sign) {
   assert(next != kInvalidExprId);
-  std::vector<ExprId> operands;
-  SignalWidth width;
-  if (current != kInvalidExprId) {
-    const auto &current_node = get_node(current);
-    assert(current_node.op == ExprGraph::Op::kSequence);
-    operands = current_node.operands;
-    width = current_node.width;
-    assert(get_node(next).width == width);
-  } else {
-    width = get_node(next).width;
-  }
-  operands.push_back(next);
   const ExprId id = create_node();
   auto &node = get_node(id);
   node.op = ExprGraph::Op::kSequence;
-  node.width = width;
-  node.sign = false;
+  node.width = get_node(next).width;
+  node.sign = get_node(next).sign;
+  node.operands = {next};
+  graph_.sequences.push_back({id, base, std::move(unpacked_dims), width, sign});
+  return id;
+}
+
+ExprId ExprBuilder::create_sequence(ExprId current, ExprId next) {
+  assert(current != kInvalidExprId);
+  assert(next != kInvalidExprId);
+  const auto &current_node = get_node(current);
+  assert(current_node.op == ExprGraph::Op::kSequence);
+  assert(get_node(next).width == current_node.width);
+  std::vector<ExprId> operands = current_node.operands;
+  operands.push_back(next);
+  const ExprGraph::Sequence *sequence_properties = nullptr;
+  for (const auto &candidate : graph_.sequences) {
+    if (candidate.id == current) {
+      sequence_properties = &candidate;
+      break;
+    }
+  }
+  assert(sequence_properties != nullptr);
+  const ExprId id = create_node();
+  auto &node = get_node(id);
+  node.op = ExprGraph::Op::kSequence;
+  node.width = get_node(next).width;
+  node.sign = get_node(next).sign;
   node.operands = std::move(operands);
+  graph_.sequences.push_back({id, sequence_properties->base, sequence_properties->unpacked_dims,
+                              sequence_properties->width, sequence_properties->sign});
+  return id;
+}
+
+ExprId ExprBuilder::create_sequence(ExprId current, ExprId next,
+                                    ExprId sequence_properties_source) {
+  assert(next != kInvalidExprId);
+  std::vector<ExprId> operands;
+  if (current != kInvalidExprId) {
+    const auto &current_node = get_node(current);
+    assert(current_node.op == ExprGraph::Op::kSequence);
+    assert(get_node(next).width == current_node.width);
+    operands = current_node.operands;
+  }
+  operands.push_back(next);
+  const ExprGraph::Sequence *sequence_properties = nullptr;
+  for (const auto &candidate : graph_.sequences) {
+    if (candidate.id == sequence_properties_source) {
+      sequence_properties = &candidate;
+      break;
+    }
+  }
+  assert(sequence_properties != nullptr);
+  const ExprId id = create_node();
+  auto &node = get_node(id);
+  node.op = ExprGraph::Op::kSequence;
+  node.width = get_node(next).width;
+  node.sign = get_node(next).sign;
+  node.operands = std::move(operands);
+  graph_.sequences.push_back({id, sequence_properties->base, sequence_properties->unpacked_dims,
+                              sequence_properties->width, sequence_properties->sign});
   return id;
 }
 ExprId ExprBuilder::create_unpacked_assign(ExprId next, ExprId base, ExprId slice_width,
@@ -603,6 +651,9 @@ ExprId ExprBuilder::get_current_value(std::string_view name) const {
 }
 void ExprBuilder::update_value(std::string name, ExprId id) {
   name_map_.insert_or_assign(std::move(name), id);
+}
+void ExprBuilder::remove_input(std::string_view name) {
+  graph_.inputs.erase(std::string(name));
 }
 
 bool ExprBuilder::get_input_spec(ExprId id, ExprId &input_id, std::string &name, SignalWidth &width,

@@ -167,6 +167,9 @@ void StmtBuilder::merge_context() {
   assert(contexts_.size() > 1);
   Context child = std::move(contexts_.back());
   contexts_.pop_back();
+  for (const auto &name : child.local_names) {
+    child.expr_builder.remove_input(name);
+  }
   for (size_t i : collect_last_output_indices(child)) {
     if (child.local_names.contains(child.output_names[i])) {
       continue;
@@ -232,7 +235,7 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
     assert(new_id != kInvalidExprId);
     if (is_sequence) {
       ExprId current_id = fallback_value(name);
-      new_id = expr_builder.create_sequence(current_id, new_id);
+      new_id = expr_builder.create_sequence(current_id, new_id, then_id);
     }
     transfer_output(then_ctx, i, new_id);
   }
@@ -250,7 +253,7 @@ void StmtBuilder::merge_conditional(ExprId cond_id) {
     ExprId new_id = kInvalidExprId;
     if (is_sequence) {
       new_id = expr_builder.create_mux(cond_id, kInvalidExprId, else_id);
-      new_id = expr_builder.create_sequence(then_id, new_id);
+      new_id = expr_builder.create_sequence(then_id, new_id, else_id);
     } else {
       if (then_id == kInvalidExprId) {
         then_id = expr_builder.find_or_create_input(name, expr_builder.get_width(else_id),
@@ -302,11 +305,15 @@ void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case
     bool is_first = true;
     bool is_nonblocking = false;
     bool is_sequence = false;
+    ExprId sequence_source = kInvalidExprId;
     for (size_t j = 0; j < branch_count; ++j) {
       if (case_output_ids[entry.second][j] != kInvalidExprId) {
         if (is_first) {
           is_nonblocking = case_output_nonblocking[entry.second][j];
           is_sequence = case_output_sequence[entry.second][j];
+          if (is_sequence) {
+            sequence_source = case_output_ids[entry.second][j];
+          }
           is_first = false;
         } else {
           assert(is_nonblocking == case_output_nonblocking[entry.second][j]);
@@ -342,7 +349,7 @@ void StmtBuilder::merge_case(ExprId selector_id, const std::vector<ExprId> &case
     ExprId new_id = expr_builder.create_case(selector_id, case_values,
                                              std::move(case_output_ids[entry.second]));
     if (is_sequence) {
-      new_id = expr_builder.create_sequence(current_id, new_id);
+      new_id = expr_builder.create_sequence(current_id, new_id, sequence_source);
     }
     if (!is_nonblocking) {
       expr_builder.update_value(entry.first, new_id);

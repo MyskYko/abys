@@ -87,7 +87,10 @@ public:
   ExprId create_unpacked_range(ExprId data, ExprId base, SignalWidth width);
 
   ExprId create_gather(std::vector<ExprId> operands);
+  ExprId create_sequence(ExprId next, ExprId base, std::vector<SignalWidth> unpacked_dims,
+                         SignalWidth width, bool sign);
   ExprId create_sequence(ExprId current, ExprId next);
+  ExprId create_sequence(ExprId current, ExprId next, ExprId sequence_properties_source);
   ExprId create_unpacked_assign(ExprId next, ExprId base, ExprId slice_width, SignalWidth width,
                                 bool sign);
   ExprId create_masked_assign(ExprId current, ExprId next, ExprId base, SignalWidth slice_width,
@@ -117,6 +120,7 @@ public:
 
   ExprId get_current_value(std::string_view name) const;
   void update_value(std::string name, ExprId id);
+  void remove_input(std::string_view name);
 
   bool get_input_spec(ExprId id, ExprId &input_id, std::string &name, SignalWidth &width,
                       bool &sign) const;
