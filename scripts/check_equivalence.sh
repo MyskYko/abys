@@ -5,11 +5,11 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 abys_bin="$root_dir/build/abys"
 
 if [[ $# -lt 1 || $# -gt 3 ]]; then
-  echo "usage: $0 ORIGINAL_VERILOG [TOP_MODULE] [LOWERED_VERILOG]" >&2
+  echo "usage: $0 ORIGINAL_SYSTEMVERILOG [TOP_MODULE] [LOWERED_SYSTEMVERILOG]" >&2
   exit 2
 fi
 
-orig_v="$1"
+orig_sv="$1"
 top="${2:-}"
 
 if [[ ! -x "$abys_bin" ]]; then
@@ -17,16 +17,16 @@ if [[ ! -x "$abys_bin" ]]; then
   exit 2
 fi
 
-if [[ ! -f "$orig_v" ]]; then
-  echo "error: original Verilog file not found: $orig_v" >&2
+if [[ ! -f "$orig_sv" ]]; then
+  echo "error: original SystemVerilog file not found: $orig_sv" >&2
   exit 2
 fi
-orig_v="$(realpath "$orig_v")"
+orig_sv="$(realpath "$orig_sv")"
 
 yosys_bin="${YOSYS:-yosys}"
 
 tmp_dir="$(mktemp -d /tmp/abys-equivalence.XXXXXX)"
-lowered_v="${3:-$tmp_dir/lowered.v}"
+lowered_sv="${3:-$tmp_dir/lowered.sv}"
 equiv_ys="$tmp_dir/equiv.ys"
 gold_v="$tmp_dir/gold.v"
 gate_v="$tmp_dir/gate.v"
@@ -49,14 +49,14 @@ EOF
 
 sed -E -e 's/\$(stop|finish)[[:space:]]*(\([^;]*\))?[[:space:]]*;/begin end/g' \
   -e '/\$readmemh[[:space:]]*[(]/s|^|// |' \
-  "$orig_v" >"$orig_yosys_v"
+  "$orig_sv" >"$orig_yosys_v"
 
 if [[ -n "$top" ]]; then
   read_orig_cmd="read_slang --ignore-timing --ignore-assertions --ignore-initial --top $top $orig_yosys_v"
-  read_gate_cmd="read_slang --ignore-timing --ignore-assertions --ignore-initial --top $top $lowered_v"
+  read_gate_cmd="read_slang --ignore-timing --ignore-assertions --ignore-initial --top $top $lowered_sv"
 else
   read_orig_cmd="read_slang --ignore-timing --ignore-assertions --ignore-initial $orig_yosys_v"
-  read_gate_cmd="read_slang --ignore-timing --ignore-assertions --ignore-initial $lowered_v"
+  read_gate_cmd="read_slang --ignore-timing --ignore-assertions --ignore-initial $lowered_sv"
 fi
 
 cat >"$equiv_ys" <<EOF
@@ -89,7 +89,7 @@ write_verilog -selected "$equiv_v"
 equiv_status -assert equiv
 EOF
 
-if ! "$abys_bin" emit "$orig_v" >"$lowered_v" 2>"$emit_log"; then
+if ! "$abys_bin" emit "$orig_sv" >"$lowered_sv" 2>"$emit_log"; then
   echo "fail: abys emit failed; tmp: $tmp_dir; log: $emit_log" >&2
   exit 1
 fi
