@@ -285,8 +285,10 @@ void lower_lhs_assignment(const slang::ast::Expression &whole_lhs, ExprId rhs_id
           assert(left_pos >= right_pos);
           const SignalWidth range_width = static_cast<SignalWidth>(left_pos - right_pos + 1);
           assert(expr_builder.get_width(updated_expr_id) == range_width);
-          updated_base_id = expr_builder.create_add(updated_base_id,
-                                                    expr_builder.find_or_create_const(right_pos));
+          updated_base_id = expr_builder.create_add(
+              updated_base_id,
+              expr_builder.find_or_create_const(
+                  right_pos, ExprBuilder::minimum_unsigned_width(right_pos), false));
         } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
                    kind == slang::ast::RangeSelectionKind::IndexedDown) {
           const auto width_index = try_extract_constant_index(sel.right());
@@ -296,23 +298,19 @@ void lower_lhs_assignment(const slang::ast::Expression &whole_lhs, ExprId rhs_id
             return kInvalidExprId;
           }
           const SignalWidth width = static_cast<SignalWidth>(*width_index);
-          ExprId index_id = build_expr(sel.left(), expr_builder, context);
+          const ExprId index_id = build_expr(sel.left(), expr_builder, context);
           assert(expr_builder.get_width(updated_expr_id) == width);
-          if (width > 1) {
-            const ExprId offset_id =
-                expr_builder.find_or_create_const(static_cast<BitIndex>(width - 1));
-            if (kind == slang::ast::RangeSelectionKind::IndexedUp) {
-              if (range.left < range.right) {
-                index_id = expr_builder.create_add(index_id, offset_id);
-              }
-            } else {
-              if (range.left >= range.right) {
-                index_id = expr_builder.create_sub(index_id, offset_id);
-              }
-            }
+          BitIndex index_offset = 0;
+          if (width > 1 && kind == slang::ast::RangeSelectionKind::IndexedUp &&
+              range.left < range.right) {
+            index_offset = static_cast<BitIndex>(width - 1);
+          } else if (width > 1 && kind == slang::ast::RangeSelectionKind::IndexedDown &&
+                     range.left >= range.right) {
+            index_offset = -static_cast<BitIndex>(width - 1);
           }
-          index_id = expr_builder.normalize_index_expr(index_id, range.left, range.right);
-          updated_base_id = expr_builder.create_add(updated_base_id, index_id);
+          const ExprId normalized_index =
+              expr_builder.normalize_index_expr(index_id, range.left, range.right, index_offset);
+          updated_base_id = expr_builder.create_add(updated_base_id, normalized_index);
         } else {
           context.diagnostics.error(DiagnosticId::kLoweringUnsupportedAssignmentIgnored,
                                     "unsupported packed range selection kind");

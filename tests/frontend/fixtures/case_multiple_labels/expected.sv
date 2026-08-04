@@ -7,25 +7,17 @@ module top (
 
 
   always @(*)   begin
-    logic [2:0] abys_dumper_tmp4;
-    logic [2:0] abys_dumper_tmp6;
-    logic [2:0] abys_dumper_tmp10;
-    logic [2:0] abys_dumper_tmp12;
-      logic [7:0] abys_dumper_tmp15;
-    abys_dumper_tmp4 = $unsigned(3'b0);
-    abys_dumper_tmp6 = $unsigned(3'b10);
-    abys_dumper_tmp10 = $unsigned(3'b1);
-    abys_dumper_tmp12 = $unsigned(3'b11);
-      abys_dumper_tmp15 = (a ^ b);
+      logic [7:0] abys_dumper_tmp11;
+      abys_dumper_tmp11 = (a ^ b);
     case (selector)
-    abys_dumper_tmp4, abys_dumper_tmp6: begin
+    3'b0, 3'b10: begin
       y = a;
     end
-    abys_dumper_tmp10, abys_dumper_tmp12: begin
+    3'b1, 3'b11: begin
       y = b;
     end
     default: begin
-      y = abys_dumper_tmp15;
+      y = abys_dumper_tmp11;
     end
     endcase
   end

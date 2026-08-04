@@ -7,15 +7,11 @@ module top (
 
 
   always @(*)   begin
-    logic [1:0] abys_dumper_tmp4;
-    logic [1:0] abys_dumper_tmp7;
-    abys_dumper_tmp4 = $unsigned(2'b0);
-    abys_dumper_tmp7 = $unsigned(2'b1);
     case (select)
-    abys_dumper_tmp4: begin
+    2'b0: begin
       y = a;
     end
-    abys_dumper_tmp7: begin
+    2'b1: begin
       y = b;
     end
     default: begin

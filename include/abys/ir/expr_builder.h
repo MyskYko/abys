@@ -27,7 +27,8 @@ public:
 
   ExprId find_or_create_input(std::string name, SignalWidth width, bool sign);
   ExprId find_or_create_const(std::string value, SignalWidth width, bool sign);
-  ExprId find_or_create_const(BitIndex index);
+  ExprId find_or_create_const(BitIndex index, SignalWidth width, bool sign);
+  static SignalWidth minimum_unsigned_width(BitIndex index);
 
   ExprId create_logical_not(ExprId operand);
   ExprId create_and_reduce(ExprId operand);
@@ -76,7 +77,7 @@ public:
   ExprId create_concat(std::vector<ExprId> operands, bool sign = false);
 
   static BitIndex normalize_index(BitIndex index, BitIndex msb, BitIndex lsb);
-  ExprId normalize_index_expr(ExprId index, BitIndex msb, BitIndex lsb);
+  ExprId normalize_index_expr(ExprId index, BitIndex msb, BitIndex lsb, BitIndex index_offset = 0);
 
   ExprId create_select(ExprId data, ExprId index, BitIndex msb,
                        BitIndex lsb); // normalize and maps to kRange

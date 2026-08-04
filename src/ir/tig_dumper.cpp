@@ -706,7 +706,7 @@ TigDumper::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
         emit_expr_packed(expr_graph, node.operands[0], names, decl_os, os, indent, assumptions);
     const std::string name = temp_name();
     declare_temp(node, name);
-    os << indent << name << " = " << (node.sign ? "$signed(" : "$unsigned(") << operand << ");\n";
+    os << indent << name << " = " << operand << ";\n";
     names[id] = name;
     return name;
   }

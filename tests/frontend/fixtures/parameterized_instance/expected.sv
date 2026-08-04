@@ -18,7 +18,7 @@ module child (
   always @(*)   begin
     logic [3:0] abys_dumper_tmp3;
     logic [3:0] abys_dumper_tmp4;
-    abys_dumper_tmp3 = $unsigned(1'b1);
+    abys_dumper_tmp3 = 1'b1;
     abys_dumper_tmp4 = (a + abys_dumper_tmp3);
     y = abys_dumper_tmp4;
   end

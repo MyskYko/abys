@@ -6,8 +6,8 @@ module top (
 
 
   always @(*)   begin
-    logic [7:0] abys_dumper_tmp5;
-    abys_dumper_tmp5 = a[base +: 8];
-    y = abys_dumper_tmp5;
+    logic [7:0] abys_dumper_tmp4;
+    abys_dumper_tmp4 = a[base +: 8];
+    y = abys_dumper_tmp4;
   end
 endmodule

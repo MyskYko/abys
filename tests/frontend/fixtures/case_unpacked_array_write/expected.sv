@@ -7,79 +7,83 @@ module top (
 
 
   always @(*)   begin
-    logic [7:0] abys_dumper_tmp46 [2:0];
-    logic [31:0] abys_dumper_tmp6;
-    logic [7:0] abys_dumper_tmp3;
-    logic [31:0] abys_dumper_tmp14;
-    logic [7:0] abys_dumper_tmp11;
-    logic [31:0] abys_dumper_tmp21;
-    logic [7:0] abys_dumper_tmp18;
-    logic [1:0] abys_dumper_tmp26;
-      logic [31:0] abys_dumper_tmp30;
-    logic [1:0] abys_dumper_tmp34;
-      logic [31:0] abys_dumper_tmp37;
-      logic [31:0] abys_dumper_tmp42;
-    logic [31:0] abys_dumper_tmp49;
-    logic [7:0] abys_dumper_tmp50;
-    abys_dumper_tmp46 = memory;
-    abys_dumper_tmp6 = (2'b10 - 32'sb0);
-    abys_dumper_tmp3 = $unsigned(8'b10001);
-    abys_dumper_tmp46[abys_dumper_tmp6] = abys_dumper_tmp3;
-    abys_dumper_tmp14 = (2'b10 - 32'sb1);
-    abys_dumper_tmp11 = $unsigned(8'b100010);
-    abys_dumper_tmp46[abys_dumper_tmp14] = abys_dumper_tmp11;
-    abys_dumper_tmp21 = (2'b10 - 32'sb10);
-    abys_dumper_tmp18 = $unsigned(8'b110011);
-    abys_dumper_tmp46[abys_dumper_tmp21] = abys_dumper_tmp18;
-    abys_dumper_tmp26 = $unsigned(2'b0);
-      abys_dumper_tmp30 = (2'b10 - 32'sb0);
-    abys_dumper_tmp34 = $unsigned(2'b1);
-      abys_dumper_tmp37 = (2'b10 - 32'sb1);
-      abys_dumper_tmp42 = (2'b10 - 32'sb10);
+    logic [7:0] abys_dumper_tmp47 [2:0];
+    logic signed [32:0] abys_dumper_tmp4;
+    logic signed [32:0] abys_dumper_tmp6;
+    logic signed [32:0] abys_dumper_tmp12;
+    logic signed [32:0] abys_dumper_tmp14;
+    logic signed [32:0] abys_dumper_tmp19;
+    logic signed [32:0] abys_dumper_tmp21;
+      logic signed [32:0] abys_dumper_tmp28;
+      logic signed [32:0] abys_dumper_tmp30;
+      logic signed [32:0] abys_dumper_tmp35;
+      logic signed [32:0] abys_dumper_tmp37;
+      logic signed [32:0] abys_dumper_tmp41;
+      logic signed [32:0] abys_dumper_tmp43;
+    logic signed [32:0] abys_dumper_tmp49;
+    logic signed [32:0] abys_dumper_tmp51;
+    logic [7:0] abys_dumper_tmp52;
+    abys_dumper_tmp47 = memory;
+    abys_dumper_tmp4 = 32'sb0;
+    abys_dumper_tmp6 = (33'sb10 - abys_dumper_tmp4);
+    abys_dumper_tmp47[abys_dumper_tmp6] = 8'b10001;
+    abys_dumper_tmp12 = 32'sb1;
+    abys_dumper_tmp14 = (33'sb10 - abys_dumper_tmp12);
+    abys_dumper_tmp47[abys_dumper_tmp14] = 8'b100010;
+    abys_dumper_tmp19 = 32'sb10;
+    abys_dumper_tmp21 = (33'sb10 - abys_dumper_tmp19);
+    abys_dumper_tmp47[abys_dumper_tmp21] = 8'b110011;
+      abys_dumper_tmp28 = 32'sb0;
+      abys_dumper_tmp30 = (33'sb10 - abys_dumper_tmp28);
+      abys_dumper_tmp35 = 32'sb1;
+      abys_dumper_tmp37 = (33'sb10 - abys_dumper_tmp35);
+      abys_dumper_tmp41 = 32'sb10;
+      abys_dumper_tmp43 = (33'sb10 - abys_dumper_tmp41);
     case (select)
-    abys_dumper_tmp26: begin
-      abys_dumper_tmp46[abys_dumper_tmp6] = abys_dumper_tmp3;
-      abys_dumper_tmp46[abys_dumper_tmp14] = abys_dumper_tmp11;
-      abys_dumper_tmp46[abys_dumper_tmp21] = abys_dumper_tmp18;
-      abys_dumper_tmp46[abys_dumper_tmp30] = a;
+    2'b0: begin
+      abys_dumper_tmp47[abys_dumper_tmp6] = 8'b10001;
+      abys_dumper_tmp47[abys_dumper_tmp14] = 8'b100010;
+      abys_dumper_tmp47[abys_dumper_tmp21] = 8'b110011;
+      abys_dumper_tmp47[abys_dumper_tmp30] = a;
     end
-    abys_dumper_tmp34: begin
-      abys_dumper_tmp46[abys_dumper_tmp6] = abys_dumper_tmp3;
-      abys_dumper_tmp46[abys_dumper_tmp14] = abys_dumper_tmp11;
-      abys_dumper_tmp46[abys_dumper_tmp21] = abys_dumper_tmp18;
-      abys_dumper_tmp46[abys_dumper_tmp37] = a;
+    2'b1: begin
+      abys_dumper_tmp47[abys_dumper_tmp6] = 8'b10001;
+      abys_dumper_tmp47[abys_dumper_tmp14] = 8'b100010;
+      abys_dumper_tmp47[abys_dumper_tmp21] = 8'b110011;
+      abys_dumper_tmp47[abys_dumper_tmp37] = a;
     end
     default: begin
-      abys_dumper_tmp46[abys_dumper_tmp6] = abys_dumper_tmp3;
-      abys_dumper_tmp46[abys_dumper_tmp14] = abys_dumper_tmp11;
-      abys_dumper_tmp46[abys_dumper_tmp21] = abys_dumper_tmp18;
-      abys_dumper_tmp46[abys_dumper_tmp42] = a;
+      abys_dumper_tmp47[abys_dumper_tmp6] = 8'b10001;
+      abys_dumper_tmp47[abys_dumper_tmp14] = 8'b100010;
+      abys_dumper_tmp47[abys_dumper_tmp21] = 8'b110011;
+      abys_dumper_tmp47[abys_dumper_tmp43] = a;
     end
     endcase
-    abys_dumper_tmp49 = (2'b10 - 32'sb1);
-    abys_dumper_tmp50 = abys_dumper_tmp46[abys_dumper_tmp49];
-    y = abys_dumper_tmp50;
-    memory[abys_dumper_tmp6] = abys_dumper_tmp3;
-    memory[abys_dumper_tmp14] = abys_dumper_tmp11;
-    memory[abys_dumper_tmp21] = abys_dumper_tmp18;
+    abys_dumper_tmp49 = 32'sb1;
+    abys_dumper_tmp51 = (33'sb10 - abys_dumper_tmp49);
+    abys_dumper_tmp52 = abys_dumper_tmp47[abys_dumper_tmp51];
+    y = abys_dumper_tmp52;
+    memory[abys_dumper_tmp6] = 8'b10001;
+    memory[abys_dumper_tmp14] = 8'b100010;
+    memory[abys_dumper_tmp21] = 8'b110011;
     case (select)
-    abys_dumper_tmp26: begin
-      memory[abys_dumper_tmp6] = abys_dumper_tmp3;
-      memory[abys_dumper_tmp14] = abys_dumper_tmp11;
-      memory[abys_dumper_tmp21] = abys_dumper_tmp18;
+    2'b0: begin
+      memory[abys_dumper_tmp6] = 8'b10001;
+      memory[abys_dumper_tmp14] = 8'b100010;
+      memory[abys_dumper_tmp21] = 8'b110011;
       memory[abys_dumper_tmp30] = a;
     end
-    abys_dumper_tmp34: begin
-      memory[abys_dumper_tmp6] = abys_dumper_tmp3;
-      memory[abys_dumper_tmp14] = abys_dumper_tmp11;
-      memory[abys_dumper_tmp21] = abys_dumper_tmp18;
+    2'b1: begin
+      memory[abys_dumper_tmp6] = 8'b10001;
+      memory[abys_dumper_tmp14] = 8'b100010;
+      memory[abys_dumper_tmp21] = 8'b110011;
       memory[abys_dumper_tmp37] = a;
     end
     default: begin
-      memory[abys_dumper_tmp6] = abys_dumper_tmp3;
-      memory[abys_dumper_tmp14] = abys_dumper_tmp11;
-      memory[abys_dumper_tmp21] = abys_dumper_tmp18;
-      memory[abys_dumper_tmp42] = a;
+      memory[abys_dumper_tmp6] = 8'b10001;
+      memory[abys_dumper_tmp14] = 8'b100010;
+      memory[abys_dumper_tmp21] = 8'b110011;
+      memory[abys_dumper_tmp43] = a;
     end
     endcase
   end

@@ -69,7 +69,14 @@ public:
     this->visitDefault(expr);
     ExprId operand = expr_stack_.back();
     expr_stack_.pop_back();
-    ExprId id = builder_.create_convert(operand, expr_width(expr), expr_sign(expr));
+    ExprId id = operand;
+    if (expr.conversionKind == slang::ast::ConversionKind::Propagated &&
+        builder_.get_sign(id) != expr_sign(expr)) {
+      id = builder_.create_convert(id, builder_.get_width(id), expr_sign(expr));
+    }
+    if (builder_.get_width(id) != expr_width(expr) || builder_.get_sign(id) != expr_sign(expr)) {
+      id = builder_.create_convert(id, expr_width(expr), expr_sign(expr));
+    }
     expr_stack_.push_back(id);
   }
 
@@ -245,7 +252,8 @@ public:
         const BitIndex left_pos = builder_.normalize_index(*left_index, range.left, range.right);
         const BitIndex right_pos = builder_.normalize_index(*right_index, range.left, range.right);
         assert(left_pos >= right_pos);
-        base = builder_.find_or_create_const(right_pos);
+        base = builder_.find_or_create_const(right_pos,
+                                             ExprBuilder::minimum_unsigned_width(right_pos), false);
         width = static_cast<SignalWidth>(left_pos - right_pos + 1);
       } else if (kind == slang::ast::RangeSelectionKind::IndexedUp ||
                  kind == slang::ast::RangeSelectionKind::IndexedDown) {
@@ -258,17 +266,15 @@ public:
         left.visit(*this);
         const ExprId index = expr_stack_.back();
         expr_stack_.pop_back();
-        ExprId low = index;
-        if (width > 1) {
-          const ExprId offset = builder_.find_or_create_const(width - 1);
-          if (kind == slang::ast::RangeSelectionKind::IndexedUp && range.left < range.right) {
-            low = builder_.create_add(index, offset);
-          } else if (kind == slang::ast::RangeSelectionKind::IndexedDown &&
-                     range.left >= range.right) {
-            low = builder_.create_sub(index, offset);
-          }
+        BitIndex index_offset = 0;
+        if (width > 1 && kind == slang::ast::RangeSelectionKind::IndexedUp &&
+            range.left < range.right) {
+          index_offset = static_cast<BitIndex>(width - 1);
+        } else if (width > 1 && kind == slang::ast::RangeSelectionKind::IndexedDown &&
+                   range.left >= range.right) {
+          index_offset = -static_cast<BitIndex>(width - 1);
         }
-        base = builder_.normalize_index_expr(low, range.left, range.right);
+        base = builder_.normalize_index_expr(index, range.left, range.right, index_offset);
       } else {
         replace_with_zero(expr, "unsupported unpacked range selection kind");
         return;
@@ -314,20 +320,13 @@ public:
       bool selected_sign;
       get_width_sign(*expr.type, selected_width, selected_sign, context_.diagnostics);
       const SignalWidth data_width = builder_.get_width(data);
-      ExprId low = base;
-      if (selected_width > 1) {
-        const ExprId offset = builder_.find_or_create_const(selected_width - 1);
-        if (dir) {
-          if (range.left < range.right) {
-            low = builder_.create_add(base, offset);
-          }
-        } else {
-          if (range.left >= range.right) {
-            low = builder_.create_sub(base, offset);
-          }
-        }
+      BitIndex index_offset = 0;
+      if (selected_width > 1 && dir && range.left < range.right) {
+        index_offset = static_cast<BitIndex>(selected_width - 1);
+      } else if (selected_width > 1 && !dir && range.left >= range.right) {
+        index_offset = -static_cast<BitIndex>(selected_width - 1);
       }
-      const ExprId pos = builder_.normalize_index_expr(low, range.left, range.right);
+      const ExprId pos = builder_.normalize_index_expr(base, range.left, range.right, index_offset);
       bool is_full_width = false;
       if (selected_width == data_width) {
         const auto pos_value = builder_.try_evaluate(pos);

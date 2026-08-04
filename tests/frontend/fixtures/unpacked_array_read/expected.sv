@@ -6,10 +6,12 @@ module top (
 
 
   always @(*)   begin
-    logic [1:0] abys_dumper_tmp5;
-    logic [7:0] abys_dumper_tmp6;
-    abys_dumper_tmp5 = (2'b11 - index);
-    abys_dumper_tmp6 = a[abys_dumper_tmp5];
-    y = abys_dumper_tmp6;
+    logic signed [3:0] abys_dumper_tmp4;
+    logic signed [3:0] abys_dumper_tmp6;
+    logic [7:0] abys_dumper_tmp7;
+    abys_dumper_tmp4 = index;
+    abys_dumper_tmp6 = (4'sb11 - abys_dumper_tmp4);
+    abys_dumper_tmp7 = a[abys_dumper_tmp6];
+    y = abys_dumper_tmp7;
   end
 endmodule

@@ -9,8 +9,8 @@ module top (
     logic [15:0] abys_dumper_tmp3;
     logic [15:0] abys_dumper_tmp5;
     logic [15:0] abys_dumper_tmp6;
-    abys_dumper_tmp3 = $unsigned(a);
-    abys_dumper_tmp5 = $unsigned(b);
+    abys_dumper_tmp3 = a;
+    abys_dumper_tmp5 = b;
     abys_dumper_tmp6 = (abys_dumper_tmp3 * abys_dumper_tmp5);
     y = abys_dumper_tmp6;
   end
