@@ -4,8 +4,8 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 abys_bin="$root_dir/build/abys"
 
-if [[ $# -lt 1 || $# -gt 2 ]]; then
-  echo "usage: $0 ORIGINAL_VERILOG [TOP_MODULE]" >&2
+if [[ $# -lt 1 || $# -gt 3 ]]; then
+  echo "usage: $0 ORIGINAL_VERILOG [TOP_MODULE] [LOWERED_VERILOG]" >&2
   exit 2
 fi
 
@@ -25,8 +25,8 @@ orig_v="$(realpath "$orig_v")"
 
 yosys_bin="${YOSYS:-yosys}"
 
-tmp_dir="$(mktemp -d /tmp/abys-cec-slang.XXXXXX)"
-lowered_v="$tmp_dir/lowered.v"
+tmp_dir="$(mktemp -d /tmp/abys-equivalence.XXXXXX)"
+lowered_v="${3:-$tmp_dir/lowered.v}"
 equiv_ys="$tmp_dir/equiv.ys"
 gold_v="$tmp_dir/gold.v"
 gate_v="$tmp_dir/gate.v"
@@ -89,16 +89,15 @@ write_verilog -selected "$equiv_v"
 equiv_status -assert equiv
 EOF
 
-echo "tmp: $tmp_dir"
-
 if ! "$abys_bin" emit "$orig_v" >"$lowered_v" 2>"$emit_log"; then
-  echo "fail: abys emit failed; log: $emit_log" >&2
+  echo "fail: abys emit failed; tmp: $tmp_dir; log: $emit_log" >&2
   exit 1
 fi
 
 if ! "$yosys_bin" -m slang -q "$equiv_ys" >"$equiv_log" 2>&1; then
-  echo "fail: Yosys/slang equivalence failed; log: $equiv_log" >&2
+  echo "fail: Yosys/slang equivalence failed; tmp: $tmp_dir; log: $equiv_log" >&2
   exit 1
 fi
 
+rm -rf "$tmp_dir"
 echo "ok: Yosys/slang equivalence passed"
