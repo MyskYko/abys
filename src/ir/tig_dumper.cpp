@@ -8,8 +8,7 @@
 
 namespace abys::ir {
 
-TigDumper::TigDumper(const Tig &design, Diagnostics &diagnostics,
-                               const NamingOptions &naming)
+TigDumper::TigDumper(const Tig &design, Diagnostics &diagnostics, const NamingOptions &naming)
     : design_(design), diagnostics_(diagnostics), naming_(naming) {}
 
 void TigDumper::dump(std::ostream &os) const {
@@ -279,9 +278,9 @@ void TigDumper::emit_sequential(const Module &module, std::ostream &os) const {
   }
 }
 
-bool TigDumper::lookup_assumed_condition(
-    const ExprGraph &expr_graph, ExprId id,
-    const std::unordered_map<std::string, bool> *assumptions, bool &value) const {
+bool TigDumper::lookup_assumed_condition(const ExprGraph &expr_graph, ExprId id,
+                                         const std::unordered_map<std::string, bool> *assumptions,
+                                         bool &value) const {
   if (assumptions == nullptr) {
     return false;
   }
@@ -313,9 +312,9 @@ bool TigDumper::lookup_assumed_condition(
 }
 
 void TigDumper::emit_expr(std::string_view lhs, bool is_nonblocking, bool is_merge,
-                               const ExprGraph &expr_graph, ExprId id, std::ostream &os,
-                               std::string_view indent,
-                               const std::unordered_map<std::string, bool> *assumptions) const {
+                          const ExprGraph &expr_graph, ExprId id, std::ostream &os,
+                          std::string_view indent,
+                          const std::unordered_map<std::string, bool> *assumptions) const {
   std::map<ExprId, std::string> names;
   std::string lhs_name(lhs);
   std::ostringstream decl_os;
@@ -337,10 +336,10 @@ void TigDumper::emit_expr(std::string_view lhs, bool is_nonblocking, bool is_mer
 }
 
 void TigDumper::emit_exprs(const std::vector<std::string> &lhs_names, bool is_nonblocking,
-                                bool is_merge, const ExprGraph &expr_graph,
-                                const std::vector<ExprId> &expr_ids, std::ostream &os,
-                                std::string_view indent,
-                                const std::unordered_map<std::string, bool> *assumptions) const {
+                           bool is_merge, const ExprGraph &expr_graph,
+                           const std::vector<ExprId> &expr_ids, std::ostream &os,
+                           std::string_view indent,
+                           const std::unordered_map<std::string, bool> *assumptions) const {
   assert(lhs_names.size() == expr_ids.size());
   std::map<ExprId, std::string> names;
   std::ostringstream decl_os;
@@ -363,11 +362,12 @@ void TigDumper::emit_exprs(const std::vector<std::string> &lhs_names, bool is_no
   }
 }
 
-void TigDumper::emit_expr_unpacked(
-    const std::string &lhs, bool is_nonblocking, bool is_merge, const ExprGraph &expr_graph,
-    ExprId id, std::map<ExprId, std::string> &names, std::ostream &decl_os, std::ostream &os,
-    std::ostream &assign_os, std::string_view indent,
-    const std::unordered_map<std::string, bool> *assumptions) const {
+void TigDumper::emit_expr_unpacked(const std::string &lhs, bool is_nonblocking, bool is_merge,
+                                   const ExprGraph &expr_graph, ExprId id,
+                                   std::map<ExprId, std::string> &names, std::ostream &decl_os,
+                                   std::ostream &os, std::ostream &assign_os,
+                                   std::string_view indent,
+                                   const std::unordered_map<std::string, bool> *assumptions) const {
   if (id == kInvalidExprId) {
     return;
   }
@@ -531,9 +531,9 @@ void TigDumper::emit_expr_unpacked(
 
 std::string
 TigDumper::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
-                                 std::map<ExprId, std::string> &names, std::ostream &decl_os,
-                                 std::ostream &os, std::string_view indent,
-                                 const std::unordered_map<std::string, bool> *assumptions) const {
+                            std::map<ExprId, std::string> &names, std::ostream &decl_os,
+                            std::ostream &os, std::string_view indent,
+                            const std::unordered_map<std::string, bool> *assumptions) const {
   if (id == kInvalidExprId) {
     return "";
   }
@@ -541,7 +541,7 @@ TigDumper::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     return it->second;
   }
 
-  auto temp_name = [&]() { return naming_.emitter_temporary_signal_prefix + std::to_string(id); };
+  auto temp_name = [&]() { return naming_.dumper_temporary_signal_prefix + std::to_string(id); };
   auto declare_temp = [&](const ExprGraph::Node &node, std::string_view name) {
     decl_os << indent << "logic ";
     if (node.sign) {

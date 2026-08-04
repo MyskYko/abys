@@ -10,7 +10,7 @@ struct NamingOptions {
   std::string lowering_anonymous_block_name = "block";
   std::string builder_temporary_signal_prefix = "abys_builder_tmp";
   std::string builder_module_variant_prefix = "_abys_variant";
-  std::string emitter_temporary_signal_prefix = "abys_emitter_tmp";
+  std::string dumper_temporary_signal_prefix = "abys_dumper_tmp";
 };
 
 } // namespace abys
