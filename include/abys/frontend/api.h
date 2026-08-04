@@ -30,4 +30,10 @@ TigBuildResult build_tig_from_systemverilog(const std::vector<std::string> &file
                                             std::string_view top, Diagnostics &diagnostics,
                                             const NamingOptions &naming);
 
+/// Build a TIG design from SystemVerilog source text using slang.
+TigBuildResult build_tig_from_systemverilog_text(std::string_view source,
+                                                 std::string_view source_name, std::string_view top,
+                                                 Diagnostics &diagnostics,
+                                                 const NamingOptions &naming);
+
 } // namespace abys
