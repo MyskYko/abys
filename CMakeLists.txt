@@ -31,7 +31,7 @@ set(ABYS_CORE_SOURCES
   src/ir/expr_builder.cpp
   src/ir/stmt_builder.cpp
   src/ir/tig_builder.cpp
-  src/ir/verilog_emitter.cpp
+  src/ir/tig_dumper.cpp
 )
 
 function(abys_use_bundled_slang)

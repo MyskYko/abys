@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "abys/frontend/api.h"
-#include "abys/ir/verilog_emitter.h"
+#include "abys/ir/tig_dumper.h"
 #include "abys/version.h"
 
 namespace {
@@ -109,16 +109,16 @@ int main(int argc, char **argv) {
       return 2;
     }
 
-    abys::ir::VerilogEmitter emitter(result.design, diagnostics, naming);
+    abys::ir::TigDumper dumper(result.design, diagnostics, naming);
     if (out_path) {
       std::ofstream output_stream(*out_path);
       if (!output_stream) {
         std::cerr << "emit failed: cannot open output file: " << *out_path << '\n';
         return 3;
       }
-      emitter.emit(output_stream);
+      dumper.dump(output_stream);
     } else {
-      emitter.emit(std::cout);
+      dumper.dump(std::cout);
     }
 
     return 0;

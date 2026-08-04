@@ -4,15 +4,15 @@
 #include <unordered_set>
 #include <vector>
 
-#include "abys/ir/verilog_emitter.h"
+#include "abys/ir/tig_dumper.h"
 
 namespace abys::ir {
 
-VerilogEmitter::VerilogEmitter(const Tig &design, Diagnostics &diagnostics,
+TigDumper::TigDumper(const Tig &design, Diagnostics &diagnostics,
                                const NamingOptions &naming)
     : design_(design), diagnostics_(diagnostics), naming_(naming) {}
 
-void VerilogEmitter::emit(std::ostream &os) const {
+void TigDumper::dump(std::ostream &os) const {
   bool first = true;
   for (const Module &module : design_.modules) {
     if (!first) {
@@ -23,7 +23,7 @@ void VerilogEmitter::emit(std::ostream &os) const {
   }
 }
 
-void VerilogEmitter::emit_module(const Module &module, std::ostream &os) const {
+void TigDumper::emit_module(const Module &module, std::ostream &os) const {
   emit_module_header(module, os);
   emit_signal_decls(module, os);
   emit_instances(module, os);
@@ -32,7 +32,7 @@ void VerilogEmitter::emit_module(const Module &module, std::ostream &os) const {
   emit_module_footer(os);
 }
 
-void VerilogEmitter::emit_module_header(const Module &module, std::ostream &os) {
+void TigDumper::emit_module_header(const Module &module, std::ostream &os) {
   os << "module " << module.name << module.variant_suffix << " (\n";
   bool first = true;
   for (const auto &input : module.input_ports) {
@@ -73,7 +73,7 @@ void VerilogEmitter::emit_module_header(const Module &module, std::ostream &os) 
   os << ");\n\n";
 }
 
-void VerilogEmitter::emit_signal_decls(const Module &module, std::ostream &os) {
+void TigDumper::emit_signal_decls(const Module &module, std::ostream &os) {
   std::unordered_set<std::string> port_names;
   for (const auto &p : module.input_ports) {
     port_names.insert(p.name);
@@ -102,7 +102,7 @@ void VerilogEmitter::emit_signal_decls(const Module &module, std::ostream &os) {
   os << "\n";
 }
 
-void VerilogEmitter::emit_instances(const Module &module, std::ostream &os) const {
+void TigDumper::emit_instances(const Module &module, std::ostream &os) const {
   for (const auto &node : module.nodes) {
     if (node.kind != Module::NodeKind::kInstance) {
       continue;
@@ -143,7 +143,7 @@ void VerilogEmitter::emit_instances(const Module &module, std::ostream &os) cons
   os << "\n";
 }
 
-void VerilogEmitter::emit_combinational(const Module &module, std::ostream &os) const {
+void TigDumper::emit_combinational(const Module &module, std::ostream &os) const {
   // TODO: handle latches
   for (const auto &node : module.nodes) {
     if (node.kind == Module::NodeKind::kOp) {
@@ -183,7 +183,7 @@ void VerilogEmitter::emit_combinational(const Module &module, std::ostream &os) 
   }
 }
 
-void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) const {
+void TigDumper::emit_sequential(const Module &module, std::ostream &os) const {
   auto edge_to_string = [&](EdgeKind edge) -> const char * {
     switch (edge) {
     case EdgeKind::kPosedge:
@@ -279,7 +279,7 @@ void VerilogEmitter::emit_sequential(const Module &module, std::ostream &os) con
   }
 }
 
-bool VerilogEmitter::lookup_assumed_condition(
+bool TigDumper::lookup_assumed_condition(
     const ExprGraph &expr_graph, ExprId id,
     const std::unordered_map<std::string, bool> *assumptions, bool &value) const {
   if (assumptions == nullptr) {
@@ -312,7 +312,7 @@ bool VerilogEmitter::lookup_assumed_condition(
   return false;
 }
 
-void VerilogEmitter::emit_expr(std::string_view lhs, bool is_nonblocking, bool is_merge,
+void TigDumper::emit_expr(std::string_view lhs, bool is_nonblocking, bool is_merge,
                                const ExprGraph &expr_graph, ExprId id, std::ostream &os,
                                std::string_view indent,
                                const std::unordered_map<std::string, bool> *assumptions) const {
@@ -336,7 +336,7 @@ void VerilogEmitter::emit_expr(std::string_view lhs, bool is_nonblocking, bool i
   }
 }
 
-void VerilogEmitter::emit_exprs(const std::vector<std::string> &lhs_names, bool is_nonblocking,
+void TigDumper::emit_exprs(const std::vector<std::string> &lhs_names, bool is_nonblocking,
                                 bool is_merge, const ExprGraph &expr_graph,
                                 const std::vector<ExprId> &expr_ids, std::ostream &os,
                                 std::string_view indent,
@@ -363,7 +363,7 @@ void VerilogEmitter::emit_exprs(const std::vector<std::string> &lhs_names, bool 
   }
 }
 
-void VerilogEmitter::emit_expr_unpacked(
+void TigDumper::emit_expr_unpacked(
     const std::string &lhs, bool is_nonblocking, bool is_merge, const ExprGraph &expr_graph,
     ExprId id, std::map<ExprId, std::string> &names, std::ostream &decl_os, std::ostream &os,
     std::ostream &assign_os, std::string_view indent,
@@ -530,7 +530,7 @@ void VerilogEmitter::emit_expr_unpacked(
 }
 
 std::string
-VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
+TigDumper::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
                                  std::map<ExprId, std::string> &names, std::ostream &decl_os,
                                  std::ostream &os, std::string_view indent,
                                  const std::unordered_map<std::string, bool> *assumptions) const {
@@ -900,7 +900,7 @@ VerilogEmitter::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
   }
 }
 
-bool VerilogEmitter::can_emit_direct_range_base(const ExprGraph &expr_graph, ExprId id) {
+bool TigDumper::can_emit_direct_range_base(const ExprGraph &expr_graph, ExprId id) {
   if (id == kInvalidExprId) {
     return false;
   }
@@ -908,7 +908,7 @@ bool VerilogEmitter::can_emit_direct_range_base(const ExprGraph &expr_graph, Exp
   return node.op == ExprGraph::Op::kInput || node.op == ExprGraph::Op::kUnpackedSelect;
 }
 
-void VerilogEmitter::emit_module_footer(std::ostream &os) {
+void TigDumper::emit_module_footer(std::ostream &os) {
   os << "endmodule\n";
 }
 

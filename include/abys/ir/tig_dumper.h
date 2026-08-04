@@ -12,10 +12,10 @@
 
 namespace abys::ir {
 
-class VerilogEmitter {
+class TigDumper {
 public:
-  VerilogEmitter(const Tig &design, Diagnostics &diagnostics, const NamingOptions &naming);
-  void emit(std::ostream &os) const;
+  TigDumper(const Tig &design, Diagnostics &diagnostics, const NamingOptions &naming);
+  void dump(std::ostream &os) const;
   // std::string emit_to_string(const Design& design) const;
 
   using Module = Tig::Module;
