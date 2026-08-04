@@ -24,7 +24,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-format clang-tidy
       - name: Cache slang (prebuilt)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: _slang
           key: ${{ env.SLANG_RELEASE_TAG }}-${{ env.SLANG_TARBALL_SHA256 }}
@@ -67,7 +67,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-format clang-tidy
       - name: Cache slang (prebuilt)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: _slang
           key: ${{ env.SLANG_RELEASE_TAG }}-${{ env.SLANG_TARBALL_SHA256 }}
