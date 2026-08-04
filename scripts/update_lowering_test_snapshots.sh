@@ -16,7 +16,7 @@ tmp_dir="$(mktemp -d /tmp/abys-snapshots.XXXXXX)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 mapfile -t inputs < <(
-  find "$root_dir/tests/frontend/lowering" -mindepth 2 -maxdepth 2 -type f -name input.sv -print |
+  find "$root_dir/tests/frontend/fixtures" -mindepth 2 -maxdepth 2 -type f -name input.sv -print |
     sort
 )
 
