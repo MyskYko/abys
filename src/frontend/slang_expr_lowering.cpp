@@ -193,8 +193,10 @@ public:
       SignalWidth width;
       bool sign;
       get_width_sign(elem, width, sign, context_.diagnostics);
-      ExprId id =
-          builder_.create_unpacked_select(data, index, range.left, range.right, width, sign);
+      const SignalType signal_type = get_signal_type(elem, context_.diagnostics);
+      ExprId id = builder_.create_unpacked_select(data, index, range.left, range.right, width, sign,
+                                                  signal_type.unpacked_dims, signal_type.width,
+                                                  signal_type.sign);
       expr_stack_.push_back(id);
     } else {
       const auto range = type.getFixedRange();

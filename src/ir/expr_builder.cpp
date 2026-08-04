@@ -477,7 +477,7 @@ ExprId ExprBuilder::create_sequence(ExprId next, ExprId base,
   node.width = get_node(next).width;
   node.sign = get_node(next).sign;
   node.operands = {next};
-  graph_.sequences.push_back({id, base, std::move(unpacked_dims), width, sign});
+  graph_.unpacked_properties.push_back({id, base, std::move(unpacked_dims), width, sign});
   return id;
 }
 
@@ -489,27 +489,28 @@ ExprId ExprBuilder::create_sequence(ExprId current, ExprId next) {
   assert(get_node(next).width == current_node.width);
   std::vector<ExprId> operands = current_node.operands;
   operands.push_back(next);
-  const ExprGraph::Sequence *sequence_properties = nullptr;
-  for (const auto &candidate : graph_.sequences) {
+  const ExprGraph::UnpackedProperties *unpacked_properties = nullptr;
+  for (const auto &candidate : graph_.unpacked_properties) {
     if (candidate.id == current) {
-      sequence_properties = &candidate;
+      unpacked_properties = &candidate;
       break;
     }
   }
-  assert(sequence_properties != nullptr);
+  assert(unpacked_properties != nullptr);
   const ExprId id = create_node();
   auto &node = get_node(id);
   node.op = ExprGraph::Op::kSequence;
   node.width = get_node(next).width;
   node.sign = get_node(next).sign;
   node.operands = std::move(operands);
-  graph_.sequences.push_back({id, sequence_properties->base, sequence_properties->unpacked_dims,
-                              sequence_properties->width, sequence_properties->sign});
+  graph_.unpacked_properties.push_back({id, unpacked_properties->base,
+                                        unpacked_properties->unpacked_dims,
+                                        unpacked_properties->width, unpacked_properties->sign});
   return id;
 }
 
 ExprId ExprBuilder::create_sequence(ExprId current, ExprId next,
-                                    ExprId sequence_properties_source) {
+                                    ExprId unpacked_properties_source) {
   assert(next != kInvalidExprId);
   std::vector<ExprId> operands;
   if (current != kInvalidExprId) {
@@ -519,22 +520,23 @@ ExprId ExprBuilder::create_sequence(ExprId current, ExprId next,
     operands = current_node.operands;
   }
   operands.push_back(next);
-  const ExprGraph::Sequence *sequence_properties = nullptr;
-  for (const auto &candidate : graph_.sequences) {
-    if (candidate.id == sequence_properties_source) {
-      sequence_properties = &candidate;
+  const ExprGraph::UnpackedProperties *unpacked_properties = nullptr;
+  for (const auto &candidate : graph_.unpacked_properties) {
+    if (candidate.id == unpacked_properties_source) {
+      unpacked_properties = &candidate;
       break;
     }
   }
-  assert(sequence_properties != nullptr);
+  assert(unpacked_properties != nullptr);
   const ExprId id = create_node();
   auto &node = get_node(id);
   node.op = ExprGraph::Op::kSequence;
   node.width = get_node(next).width;
   node.sign = get_node(next).sign;
   node.operands = std::move(operands);
-  graph_.sequences.push_back({id, sequence_properties->base, sequence_properties->unpacked_dims,
-                              sequence_properties->width, sequence_properties->sign});
+  graph_.unpacked_properties.push_back({id, unpacked_properties->base,
+                                        unpacked_properties->unpacked_dims,
+                                        unpacked_properties->width, unpacked_properties->sign});
   return id;
 }
 ExprId ExprBuilder::create_unpacked_assign(ExprId next, ExprId base, ExprId slice_width,
@@ -631,7 +633,9 @@ ExprId ExprBuilder::create_both_edge(ExprId operand) {
 }
 
 ExprId ExprBuilder::create_unpacked_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb,
-                                           SignalWidth width, bool sign) {
+                                           SignalWidth width, bool sign,
+                                           std::vector<SignalWidth> unpacked_dims,
+                                           SignalWidth element_width, bool element_sign) {
   const ExprId pos = normalize_index_expr(index, msb, lsb);
   const ExprId id = create_node();
   auto &node = get_node(id);
@@ -639,6 +643,10 @@ ExprId ExprBuilder::create_unpacked_select(ExprId data, ExprId index, BitIndex m
   node.width = width;
   node.sign = sign;
   node.operands = {data, pos};
+  if (!unpacked_dims.empty()) {
+    graph_.unpacked_properties.push_back(
+        {id, kInvalidExprId, std::move(unpacked_dims), element_width, element_sign});
+  }
   return id;
 }
 

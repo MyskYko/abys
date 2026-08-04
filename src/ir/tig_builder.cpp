@@ -495,14 +495,16 @@ void TigBuilder::flatten_calls() {
                 break;
               }
             }
-          } else if (src.op == ExprGraph::Op::kSequence) {
-            for (const auto &src_sequence : subr.expr_graph.sequences) {
-              if (src_sequence.id == src_id) {
-                expr_graph.sequences.push_back({dst_id, id_map.at(src_sequence.base),
-                                                src_sequence.unpacked_dims, src_sequence.width,
-                                                src_sequence.sign});
-                break;
-              }
+          }
+          for (const auto &src_unpacked_properties : subr.expr_graph.unpacked_properties) {
+            if (src_unpacked_properties.id == src_id) {
+              const ExprId base = src_unpacked_properties.base == kInvalidExprId
+                                      ? kInvalidExprId
+                                      : id_map.at(src_unpacked_properties.base);
+              expr_graph.unpacked_properties.push_back(
+                  {dst_id, base, src_unpacked_properties.unpacked_dims,
+                   src_unpacked_properties.width, src_unpacked_properties.sign});
+              break;
             }
           }
         }

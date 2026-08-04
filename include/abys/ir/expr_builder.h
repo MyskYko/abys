@@ -90,7 +90,7 @@ public:
   ExprId create_sequence(ExprId next, ExprId base, std::vector<SignalWidth> unpacked_dims,
                          SignalWidth width, bool sign);
   ExprId create_sequence(ExprId current, ExprId next);
-  ExprId create_sequence(ExprId current, ExprId next, ExprId sequence_properties_source);
+  ExprId create_sequence(ExprId current, ExprId next, ExprId unpacked_properties_source);
   ExprId create_unpacked_assign(ExprId next, ExprId base, ExprId slice_width, SignalWidth width,
                                 bool sign);
   ExprId create_masked_assign(ExprId current, ExprId next, ExprId base, SignalWidth slice_width,
@@ -104,7 +104,9 @@ public:
                                      BitIndex msb, BitIndex lsb, SignalWidth width, bool sign);
 
   ExprId create_unpacked_select(ExprId data, ExprId index, BitIndex msb, BitIndex lsb,
-                                SignalWidth width, bool sign);
+                                SignalWidth width, bool sign,
+                                std::vector<SignalWidth> unpacked_dims = {},
+                                SignalWidth element_width = 0, bool element_sign = false);
 
   ExprId create_call(SubrId subr_id, std::string name, std::vector<ExprId> operands,
                      SignalWidth width, bool sign);

@@ -72,7 +72,7 @@ struct ExprGraph {
     std::string name; // to debug
   };
 
-  struct Sequence {
+  struct UnpackedProperties {
     ExprId id = kInvalidExprId;
     ExprId base = kInvalidExprId;
     std::vector<SignalWidth> unpacked_dims;
@@ -86,7 +86,7 @@ struct ExprGraph {
   std::unordered_map<std::string, ExprId> inputs;
   std::vector<Constant> constants = {{constant_zero, "1'b0"}, {constant_one, "1'b1"}};
   std::vector<Call> calls;
-  std::vector<Sequence> sequences;
+  std::vector<UnpackedProperties> unpacked_properties;
 };
 
 } // namespace abys::ir

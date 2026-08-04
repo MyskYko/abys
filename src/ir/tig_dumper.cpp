@@ -542,15 +542,33 @@ TigDumper::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
   }
 
   auto temp_name = [&]() { return naming_.dumper_temporary_signal_prefix + std::to_string(id); };
-  auto declare_temp = [&](const ExprGraph::Node &node, std::string_view name) {
+  auto find_unpacked_properties = [&](ExprId expr_id) -> const ExprGraph::UnpackedProperties * {
+    for (const auto &unpacked_properties : expr_graph.unpacked_properties) {
+      if (unpacked_properties.id == expr_id) {
+        return &unpacked_properties;
+      }
+    }
+    return nullptr;
+  };
+  auto declare_temp = [&](const ExprGraph::Node &node, std::string_view name,
+                          const ExprGraph::UnpackedProperties *unpacked_properties = nullptr) {
     decl_os << indent << "logic ";
-    if (node.sign) {
+    const bool sign = unpacked_properties == nullptr ? node.sign : unpacked_properties->sign;
+    const SignalWidth width =
+        unpacked_properties == nullptr ? node.width : unpacked_properties->width;
+    if (sign) {
       decl_os << "signed ";
     }
-    if (node.width > 1) {
-      decl_os << "[" << (node.width - 1) << ":0] ";
+    if (width > 1) {
+      decl_os << "[" << (width - 1) << ":0] ";
     }
-    decl_os << name << ";\n";
+    decl_os << name;
+    if (unpacked_properties != nullptr) {
+      for (const SignalWidth dim : unpacked_properties->unpacked_dims) {
+        decl_os << " [" << (dim - 1) << ":0]";
+      }
+    }
+    decl_os << ";\n";
   };
 
   const auto &node = expr_graph.nodes[id];
@@ -617,34 +635,18 @@ TigDumper::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     names[id] = "1'b0";
     return names[id];
   case ExprGraph::Op::kSequence: {
-    const ExprGraph::Sequence *sequence_properties = nullptr;
-    for (const auto &candidate : expr_graph.sequences) {
-      if (candidate.id == id) {
-        sequence_properties = &candidate;
-        break;
-      }
-    }
-    assert(sequence_properties != nullptr);
+    const ExprGraph::UnpackedProperties *unpacked_properties = find_unpacked_properties(id);
+    assert(unpacked_properties != nullptr);
     const std::string name = temp_name();
-    decl_os << indent << "logic ";
-    if (sequence_properties->sign) {
-      decl_os << "signed ";
-    }
-    if (sequence_properties->width > 1) {
-      decl_os << "[" << (sequence_properties->width - 1) << ":0] ";
-    }
-    decl_os << name;
-    for (const SignalWidth dim : sequence_properties->unpacked_dims) {
-      decl_os << " [" << (dim - 1) << ":0]";
-    }
-    decl_os << ";\n";
-    const std::string base = emit_expr_packed(expr_graph, sequence_properties->base, names, decl_os,
+    declare_temp(node, name, unpacked_properties);
+    const std::string base = emit_expr_packed(expr_graph, unpacked_properties->base, names, decl_os,
                                               os, indent, assumptions);
     if (!base.empty()) {
       os << indent << name << " = " << base << ";\n";
     }
     emit_expr_unpacked(name, false, false, expr_graph, id, names, decl_os, os, os, indent,
                        assumptions);
+    names[id] = name;
     return name;
   }
   case ExprGraph::Op::kLogicalNot: {
@@ -777,7 +779,8 @@ TigDumper::emit_expr_packed(const ExprGraph &expr_graph, ExprId id,
     const std::string index =
         emit_expr_packed(expr_graph, node.operands[1], names, decl_os, os, indent, assumptions);
     const std::string name = temp_name();
-    declare_temp(node, name);
+    const ExprGraph::UnpackedProperties *unpacked_properties = find_unpacked_properties(id);
+    declare_temp(node, name, unpacked_properties);
     os << indent << name << " = " << data << "[" << index << "];\n";
     names[id] = name;
     return name;
