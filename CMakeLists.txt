@@ -82,7 +82,5 @@ target_link_libraries(abys PRIVATE abys_core)
 
 if(ABYS_ENABLE_TESTS)
   enable_testing()
-  add_executable(abys_smoke tests/smoke.cpp)
-  target_link_libraries(abys_smoke PRIVATE abys_core)
-  add_test(NAME abys_smoke COMMAND abys_smoke)
+  add_subdirectory(tests)
 endif()
