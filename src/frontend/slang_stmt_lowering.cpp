@@ -269,15 +269,9 @@ public:
         const bool rhs_sign = builder_.get_expr_builder().get_sign(rhs_id);
         const int rhs_value =
             builder_.get_expr_builder().evaluate(rhs_id); // TODO: sanitize type of this evaluate
-        const uint64_t magnitude = rhs_value < 0
-                                       ? static_cast<uint64_t>(-static_cast<int64_t>(rhs_value))
-                                       : static_cast<uint64_t>(rhs_value);
-        const slang::SVInt rhs_sv(rhs_width, magnitude, rhs_sign);
+        const slang::SVInt rhs_sv(rhs_width, static_cast<uint64_t>(rhs_value), rhs_sign);
         rhs_id = builder_.get_expr_builder().find_or_create_const(
             rhs_sv.toString(slang::LiteralBase::Binary), rhs_width, rhs_sign);
-        if (rhs_value < 0) {
-          rhs_id = builder_.get_expr_builder().create_unary_minus(rhs_id);
-        }
         lower_lhs_assignment(assign.left(), rhs_id, rhs_width, builder_.get_expr_builder(),
                              context_, &builder_.scheduled_assignments(),
                              [&](const std::string &output_name, ExprId expr_id) {

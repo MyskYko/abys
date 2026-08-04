@@ -3,11 +3,63 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
+#include <string_view>
 #include <utility>
 
 #include "abys/ir/expr_builder.h"
 
 namespace abys::ir {
+
+namespace {
+
+std::optional<int> parse_binary_constant(std::string_view value) {
+  bool negative = false;
+  if (!value.empty() && value.front() == '-') {
+    negative = true;
+    value.remove_prefix(1);
+  }
+
+  size_t pos = value.find('\'');
+  if (pos == std::string_view::npos) {
+    return std::nullopt;
+  }
+  ++pos;
+  if (pos < value.size() && value[pos] == 's') {
+    ++pos;
+  }
+  if (pos >= value.size() || value[pos] != 'b') {
+    return std::nullopt;
+  }
+  ++pos;
+  if (pos == value.size()) {
+    return std::nullopt;
+  }
+
+  const uint64_t limit = negative ? static_cast<uint64_t>(std::numeric_limits<int>::max()) + 1
+                                  : static_cast<uint64_t>(std::numeric_limits<int>::max());
+  uint64_t magnitude = 0;
+  for (; pos < value.size(); ++pos) {
+    const char digit = value[pos];
+    if (digit != '0' && digit != '1') {
+      return std::nullopt;
+    }
+    const uint64_t bit = static_cast<uint64_t>(digit - '0');
+    if (magnitude > (limit - bit) / 2) {
+      return std::nullopt;
+    }
+    magnitude = magnitude * 2 + bit;
+  }
+
+  if (!negative) {
+    return static_cast<int>(magnitude);
+  }
+  if (magnitude == static_cast<uint64_t>(std::numeric_limits<int>::max()) + 1) {
+    return std::numeric_limits<int>::min();
+  }
+  return -static_cast<int>(magnitude);
+}
+
+} // namespace
 
 ExprBuilder::ExprBuilder(ExprGraph &graph, Diagnostics &diagnostics)
     : graph_(graph), diagnostics_(diagnostics) {}
@@ -728,26 +780,7 @@ std::optional<int> ExprBuilder::try_evaluate(ExprId id) const {
       if (c.id != id) {
         continue;
       }
-      const std::string &s = c.value;
-      auto pos = s.find('\'');
-      if (pos == std::string::npos) {
-        return std::nullopt;
-      }
-      if (s[pos + 1] == 's') {
-        ++pos;
-      }
-      if (s[pos + 1] != 'b') {
-        return std::nullopt;
-      }
-      pos += 2;
-      int value = 0;
-      for (char ch : s.substr(pos)) {
-        if (ch != '0' && ch != '1') {
-          return std::nullopt;
-        }
-        value = (value << 1) | (ch - '0');
-      }
-      return value;
+      return parse_binary_constant(c.value);
     }
     return std::nullopt;
   }
@@ -927,22 +960,9 @@ int ExprBuilder::evaluate(ExprId id) const {
       if (c.id != id) {
         continue;
       }
-      const std::string &s = c.value;
-      auto pos = s.find('\'');
-      assert(pos != std::string::npos);
-      assert(s[pos + 1] == 's' || s[pos + 1] == 'b');
-      if (s[pos + 1] == 's') {
-        ++pos;
-      }
-      assert(s[pos + 1] == 'b');
-      pos += 2;
-      const std::string digits = s.substr(pos);
-      int value = 0;
-      for (char ch : digits) {
-        assert(ch == '0' || ch == '1');
-        value = (value << 1) | (ch - '0');
-      }
-      return value;
+      const auto value = parse_binary_constant(c.value);
+      assert(value.has_value());
+      return *value;
     }
     assert(0);
     break;
