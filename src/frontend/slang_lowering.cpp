@@ -4,7 +4,7 @@
 namespace abys::frontend {
 
 class SlangLoweringVisitor final
-    : public slang::ast::ASTVisitor<SlangLoweringVisitor, false, false, false, true> {
+    : public slang::ast::ASTVisitor<SlangLoweringVisitor, slang::ast::VisitFlags::Canonical> {
 private:
   using ModuleId = TigBuilder::ModuleId;
   using NodeId = TigBuilder::NodeId;

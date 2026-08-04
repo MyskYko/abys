@@ -3,7 +3,8 @@
 namespace abys::frontend {
 
 class SlangStmtLoweringVisitor final
-    : public slang::ast::ASTVisitor<SlangStmtLoweringVisitor, true, false, false, true> {
+    : public slang::ast::ASTVisitor<SlangStmtLoweringVisitor,
+                                    slang::ast::VisitFlags::StatementsCanonical> {
 private:
   StmtBuilder &builder_;
   SlangLoweringContext &context_;

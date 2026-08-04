@@ -3,7 +3,9 @@
 namespace abys::frontend {
 
 class SlangExprLoweringVisitor final
-    : public slang::ast::ASTVisitor<SlangExprLoweringVisitor, false, true, false, true> {
+    : public slang::ast::ASTVisitor<
+          SlangExprLoweringVisitor,
+          slang::ast::VisitFlags::Expressions | slang::ast::VisitFlags::Canonical> {
 private:
   ExprBuilder &builder_;
   SlangLoweringContext &context_;
