@@ -16,7 +16,8 @@ tmp_dir="$(mktemp -d /tmp/abys-snapshots.XXXXXX)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 mapfile -t inputs < <(
-  find "$root_dir/tests/frontend" -mindepth 2 -maxdepth 2 -type f -name input.sv -print | sort
+  find "$root_dir/tests/frontend/lowering" -mindepth 2 -maxdepth 2 -type f -name input.sv -print |
+    sort
 )
 
 stale=0
@@ -25,8 +26,8 @@ failures=0
 for input_file in "${inputs[@]}"; do
   test_dir="$(dirname "$input_file")"
   test_name="${test_dir#"$root_dir/"}"
-  expected_file="$test_dir/expected.v"
-  candidate="$tmp_dir/$(basename "$test_dir").v"
+  expected_file="$test_dir/expected.sv"
+  candidate="$tmp_dir/$(basename "$test_dir").sv"
   equivalence_log="$tmp_dir/$(basename "$test_dir").equivalence.log"
 
   if ! "$equivalence_script" "$input_file" top "$candidate" >"$equivalence_log" 2>&1; then

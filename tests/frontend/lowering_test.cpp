@@ -21,9 +21,9 @@ std::string read_file(const std::filesystem::path &path) {
 
 TEST_CASE("lower SystemVerilog to the expected TIG dump", "[frontend]") {
   std::vector<std::filesystem::path> tests;
-  for (const auto &entry : std::filesystem::directory_iterator(ABYS_FRONTEND_TEST_DIR)) {
+  for (const auto &entry : std::filesystem::directory_iterator(ABYS_LOWERING_TEST_DIR)) {
     if (entry.is_directory() && std::filesystem::exists(entry.path() / "input.sv") &&
-        std::filesystem::exists(entry.path() / "expected.v")) {
+        std::filesystem::exists(entry.path() / "expected.sv")) {
       tests.push_back(entry.path());
     }
   }
@@ -33,7 +33,7 @@ TEST_CASE("lower SystemVerilog to the expected TIG dump", "[frontend]") {
     DYNAMIC_SECTION(test.filename().string()) {
       const auto input_path = test / "input.sv";
       const auto output = abys::test::lower_and_dump(read_file(input_path), input_path.string());
-      CHECK(output == read_file(test / "expected.v"));
+      CHECK(output == read_file(test / "expected.sv"));
     }
   }
 }
