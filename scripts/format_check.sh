@@ -9,6 +9,7 @@ fi
 mapfile -t files < <(
   git ls-files '*.h' '*.hpp' '*.cc' '*.cpp' |
     while IFS= read -r file; do
+      [[ "$file" == tests/third_party/* ]] && continue
       [[ -f "$file" ]] && printf '%s\n' "$file"
     done
 )
