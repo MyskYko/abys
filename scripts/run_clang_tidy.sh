@@ -18,7 +18,8 @@ if [ ! -f "$compdb" ]; then
 fi
 
 mapfile -t files < <(
-  git ls-files 'src/*.cpp' 'src/**/*.cpp' 'tests/*.cpp' 'tests/**/*.cpp' |
+  git ls-files 'src/*.cpp' 'src/**/*.cpp' 'tests/*.cpp' 'tests/**/*.cpp' \
+    ':(exclude)tests/third_party/**' |
     while IFS= read -r file; do
       [[ -f "$file" ]] && printf '%s\n' "$file"
     done
