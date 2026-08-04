@@ -3,7 +3,6 @@ module top (
   input [7:0] value,
   output  logic [7:0] y);
 
-  logic [7:0] memory_abys_block0 [3:0];
 
 
   always @(*)   begin

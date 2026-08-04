@@ -21,6 +21,7 @@ private:
 
   std::string suffix_;
   size_t anonymous_block_count_ = 0;
+  bool in_statement_block_ = false;
   SlangLoweringContext context_;
   const NamingOptions &naming_;
 
@@ -394,7 +395,13 @@ public:
     this->visitDefault(symbol);
   }
 
-  void handle(const slang::ast::VariableSymbol &symbol) { create_signal(symbol); }
+  void handle(const slang::ast::VariableSymbol &symbol) {
+    if (in_statement_block_) {
+      register_symbol_name(symbol, context_.special_symbols, suffix_);
+      return;
+    }
+    create_signal(symbol);
+  }
 
   void handle(const slang::ast::NetSymbol &symbol) {
     const std::string variable_name = create_signal(symbol);
@@ -528,7 +535,10 @@ public:
     } else {
       fragment = naming_.lowering_scope_separator + std::string(symbol.name);
     }
+    const bool previous = in_statement_block_;
+    in_statement_block_ = true;
     visit_with_suffix(symbol, std::move(fragment));
+    in_statement_block_ = previous;
   }
 
   void handle(const slang::ast::GenerateBlockSymbol &symbol) {

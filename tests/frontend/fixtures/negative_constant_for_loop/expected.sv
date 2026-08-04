@@ -2,7 +2,6 @@ module top (
   input [3:0] a,
   output  logic [3:0] y);
 
-  logic signed [31:0] i_abys_block0;
 
 
   always @(*)   begin
