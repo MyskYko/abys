@@ -30,7 +30,7 @@ public:
 
   void handle(const slang::ast::VariableDeclStatement &stmt) {
     const auto &symbol = stmt.symbol;
-    const std::string name(symbol.name);
+    const std::string name = lower_symbol_name(symbol, context_.special_symbols);
     builder_.add_local_variable(name);
     if (const auto *init = symbol.getInitializer()) {
       ExprId expr_id = build_expr(*init, builder_.get_expr_builder(), context_);
@@ -197,7 +197,7 @@ public:
     if (!stmt.loopVars.empty()) {
       builder_.create_context();
       for (const auto *var : stmt.loopVars) {
-        const std::string name(var->name);
+        const std::string name = lower_symbol_name(*var, context_.special_symbols);
         builder_.add_local_variable(name);
         if (const auto *init = var->getInitializer()) {
           ExprId expr_id = build_expr(*init, builder_.get_expr_builder(), context_);
