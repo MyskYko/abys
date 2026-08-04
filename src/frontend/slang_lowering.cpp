@@ -444,8 +444,7 @@ public:
     const slang::ast::Statement &stmt = symbol.getBody();
     lower_statement(stmt, stmt_builder, context_, pragmas_);
     if (stmt_builder.is_undecided()) {
-      context_.diagnostics.error(
-          DiagnosticId::kLoweringUndecidedProcessTreatedAsCombOrLatch);
+      context_.diagnostics.error(DiagnosticId::kLoweringUndecidedProcessTreatedAsCombOrLatch);
       stmt_builder.set_comb_or_latch();
     }
     stmt_builder.for_each_input([&](const std::string &name, SignalWidth width, bool sign) {
