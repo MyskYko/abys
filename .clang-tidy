@@ -1,3 +1,5 @@
 Checks: '-*,bugprone-*,performance-*,readability-*,clang-analyzer-*'
 WarningsAsErrors: ''
 HeaderFilterRegex: '.*'
+CheckOptions:
+  readability-identifier-length.MinimumVariableNameLength: '1'
