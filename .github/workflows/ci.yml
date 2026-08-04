@@ -5,8 +5,8 @@ on:
   pull_request:
 
 env:
-  SLANG_RELEASE_TAG: slang-ubuntu-2026-08-02
-  SLANG_TARBALL_SHA256: 378e623e57ffb946538e40edf0a5e499413b88f330ef13970ad75aa557a13260
+  SLANG_RELEASE_TAG: slang-ubuntu-2026-08-04
+  SLANG_TARBALL_SHA256: 03946a2270d78dbb73bc46f7b84b0bc8b735be6f3b0f368bb47c9a823ec50bc1
 
 jobs:
   build-test:
