@@ -5,8 +5,8 @@ on:
   pull_request:
 
 env:
-  SLANG_RELEASE_TAG: slang-ubuntu-2026-06-29
-  SLANG_TARBALL_SHA256: 86b0eee26eaac399803ec1392bd2d96007d555d137466a066aaded69d30aa892
+  SLANG_RELEASE_TAG: slang-ubuntu-2026-08-02
+  SLANG_TARBALL_SHA256: 378e623e57ffb946538e40edf0a5e499413b88f330ef13970ad75aa557a13260
 
 jobs:
   build-test:
@@ -36,7 +36,7 @@ jobs:
           fi
           mkdir -p _slang
           curl -L -o slang-ubuntu-latest.tar.gz \
-            https://github.com/MyskYko/slang/releases/download/${SLANG_RELEASE_TAG}/slang-ubuntu-latest.tar.gz
+            https://github.com/exsynth/slang/releases/download/${SLANG_RELEASE_TAG}/slang-ubuntu-latest.tar.gz
           if [ -n "${SLANG_TARBALL_SHA256:-}" ]; then
             echo "${SLANG_TARBALL_SHA256}  slang-ubuntu-latest.tar.gz" | sha256sum --check
           fi
@@ -79,7 +79,7 @@ jobs:
           fi
           mkdir -p _slang
           curl -L -o slang-ubuntu-latest.tar.gz \
-            https://github.com/MyskYko/slang/releases/download/${SLANG_RELEASE_TAG}/slang-ubuntu-latest.tar.gz
+            https://github.com/exsynth/slang/releases/download/${SLANG_RELEASE_TAG}/slang-ubuntu-latest.tar.gz
           if [ -n "${SLANG_TARBALL_SHA256:-}" ]; then
             echo "${SLANG_TARBALL_SHA256}  slang-ubuntu-latest.tar.gz" | sha256sum --check
           fi
